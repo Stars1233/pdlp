@@ -183,35 +183,41 @@ def solve(
         kkt_b = kkt_error_sq(x_bar, y_bar, w)
         return (x, y) if (kkt_z < kkt_b) else (x_bar, y_bar)
 
-    def should_restart(
-        x_cur: torch.Tensor, y_cur: torch.Tensor,
-        x_avg: torch.Tensor, y_avg: torch.Tensor,
-        x_cand: torch.Tensor, y_cand: torch.Tensor,
-        w_val: torch.Tensor,
-        t: int, k: int,
-    ) -> bool:
-        # simplest: never early restart; only restart when inner loop budget ends
-        # TODO
-        return False
+    @torch.no_grad()
+    def termination_criteria(x, y, eps=1e-6):
+        # 1) build g and lambda
+        g = c - (K.T @ y)                 # (n,)
+        lam = compute_lambda_for_box(x, g)
 
-    def termination_criteria(x_cur: torch.Tensor, y_cur: torch.Tensor, w_cur: float, k: int,
-                            kkt_best: float, abs_tol: float = 1e-4) -> bool:
-        """Check if converged or diverging."""
-        if k < 10:  # Don't terminate too early
-            return False
+        # split lambda into + and - (where lambda^- is nonnegative)
+        lam_pos = torch.clamp(lam, min=0.0)     # λ^+
+        lam_minus = torch.clamp(-lam, min=0.0)  # λ^- ≥ 0
 
-        kkt = kkt_error_sq(x_cur, y_cur, w_cur)
+        fin_l = torch.isfinite(l)
+        fin_u = torch.isfinite(u)
 
-        # Converged: KKT below absolute tolerance
-        if kkt < abs_tol:
-            return True
+        l_term = (l[fin_l] * lam_pos[fin_l]).sum()
+        u_term = (u[fin_u] * lam_minus[fin_u]).sum()
 
-        # Diverging: KKT is 100x worse than best seen
-        if kkt > 100.0 * kkt_best:
-            print(f"Stopping due to divergence: KKT={kkt.item():.3e} > 10*best={kkt_best:.3e}")
-            return True
+        qTy = (q @ y)
+        cTx = (c @ x)
 
-        return False
+        # ---- (i) relative gap ----
+        gap_num = torch.abs(qTy + l_term - u_term - cTx)
+        gap_den = 1.0 + torch.abs(qTy + l_term - u_term) + torch.abs(cTx)
+        gap_ok = (gap_num / gap_den) <= eps
+
+        # ---- (ii) primal feasibility ----
+        r_eq = b - (A @ x)                   # (m2,)
+        r_ineq = torch.clamp(h - (G @ x), min=0.0)  # (m1,)
+        feas = torch.sqrt((r_eq @ r_eq) + (r_ineq @ r_ineq))
+        feas_ok = feas <= eps * (1.0 + torch.linalg.norm(q))
+
+        # ---- (iii) stationarity ----
+        stat = torch.linalg.norm(g - lam)
+        stat_ok = stat <= eps * (1.0 + torch.linalg.norm(c))
+
+        return bool(gap_ok and feas_ok and stat_ok)
 
     @torch.no_grad()
     def adaptive_step_pdhg(
@@ -280,9 +286,6 @@ def solve(
     # initialize candidate at t=0
     x_c, y_c = x.clone(), y.clone()
 
-    # Track best KKT for termination
-    kkt_best = float('inf')
-
     # Restart parameters (from cuPDLP.jl defaults)
     beta_sufficient = 0.2   # Sufficient progress threshold
     beta_necessary = 0.8    # Necessary progress threshold
@@ -293,12 +296,6 @@ def solve(
     for n_outer in range(MAX_OUTER_ITERS):
         # compute KKT of last restart point with current primal weight
         kkt_last_restart = kkt_error_sq(x, y, w)
-
-        # Update best KKT
-        kkt_best = min(kkt_best, kkt_last_restart.item())
-
-        if verbose and (n_outer % 10 == 0 or n_outer < 5):
-            print(f"Outer iter {n_outer}: x={x.numpy()}, y={y.numpy()}, KKT={kkt_last_restart.item():.3e}, best={kkt_best:.3e}, w={w:.3e}")
 
         # Check for NaN/Inf
         if torch.isnan(x).any() or torch.isnan(y).any():
@@ -324,7 +321,7 @@ def solve(
         kkt_c_prev = kkt_last_restart  # Initialize for first iteration
 
         for t in range(MAX_INNER_ITERS):
-            if termination_criteria(x, y, w, k_global, kkt_best):
+            if termination_criteria(x, y):
                 # print(f"Terminated at iteration {k_global}")
                 if verbose:
                     print(f"Solution in scaled space: x={x.numpy()}, y={y.numpy()}")

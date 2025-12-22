@@ -53,7 +53,7 @@ def test_problem_2():
     minimize:    x1 + x2
     subject to:  x1 + 2*x2 = 3  (equality)
                  x1, x2 >= 0
-    Expected solution: x1* = 3, x2* = 0
+    Expected solution: x1* = 0, x2* = 1.5, obj = 1.5
     """
     print("\n" + "=" * 70)
     print("TEST 2: Problem with equality constraint")
@@ -70,11 +70,11 @@ def test_problem_2():
     print("  Objective: minimize x1 + x2")
     print("  Constraint: x1 + 2*x2 = 3")
     print("  Bounds: 0 <= x1, x2 <= 10")
-    print("  Expected: x = [3.0, 0.0], obj = 3.0")
+    print("  Expected: x = [0.0, 1.5], obj = 1.5")
 
     x_sol, y_sol = solve(G, A, c, h, b, l, u, verbose=False)
 
-    expected = torch.tensor([3.0, 0.0])
+    expected = torch.tensor([0.0, 1.5])
     error = torch.norm(x_sol - expected).item()
     obj = (c @ x_sol).item()
 
@@ -95,7 +95,7 @@ def test_problem_3():
                  x1 >= 1
                  x2 >= 1
                  0 <= xi <= 10
-    Expected solution: x* = [1, 1, 1]
+    Expected solution: obj = 3.0 (multiple optimal solutions exist)
     """
     print("\n" + "=" * 70)
     print("TEST 3: 3D problem with multiple inequalities")
@@ -116,17 +116,17 @@ def test_problem_3():
     print("  Objective: minimize x1 + x2 + x3")
     print("  Constraints: x1 + x2 + x3 >= 3, x1 >= 1, x2 >= 1")
     print("  Bounds: 0 <= xi <= 10")
-    print("  Expected: x = [1.0, 1.0, 1.0], obj = 3.0")
+    print("  Expected: obj = 3.0")
 
     x_sol, y_sol = solve(G, A, c, h, b, l, u, verbose=False)
 
-    expected = torch.tensor([1.0, 1.0, 1.0])
-    error = torch.norm(x_sol - expected).item()
+    expected_obj = 3.0
     obj = (c @ x_sol).item()
+    error = abs(obj - expected_obj)
 
     print(f"\n  Solution: x = [{x_sol[0].item():.6f}, {x_sol[1].item():.6f}, {x_sol[2].item():.6f}]")
     print(f"  Objective: {obj:.6f}")
-    print(f"  Error: {error:.6e}")
+    print(f"  Error from expected obj: {error:.6e}")
     print(f"  {'PASS' if error < 0.01 else 'FAIL'}")
 
     return error < 0.01
@@ -220,7 +220,7 @@ def test_problem_6():
     subject to:  x1 + x2 + x3 = 5  (equality)
                  x1 + x2 >= 2      (inequality)
                  0 <= xi <= 10
-    Expected solution: x* = [2, 0, 3]
+    Expected solution: x* = [5, 0, 0], obj = 5.0
     """
     print("\n" + "=" * 70)
     print("TEST 6: Mixed equality and inequality constraints")
@@ -237,11 +237,11 @@ def test_problem_6():
     print("  Objective: minimize x1 + 3*x2 + 2*x3")
     print("  Constraints: x1 + x2 + x3 = 5, x1 + x2 >= 2")
     print("  Bounds: 0 <= xi <= 10")
-    print("  Expected: x = [2.0, 0.0, 3.0], obj = 8.0")
+    print("  Expected: x = [5.0, 0.0, 0.0], obj = 5.0")
 
     x_sol, y_sol = solve(G, A, c, h, b, l, u, verbose=False)
 
-    expected = torch.tensor([2.0, 0.0, 3.0])
+    expected = torch.tensor([5.0, 0.0, 0.0])
     error = torch.norm(x_sol - expected).item()
     obj = (c @ x_sol).item()
 

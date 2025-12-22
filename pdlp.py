@@ -81,7 +81,7 @@ def solve(
 
         if (dx > eps_zero) and (dy > eps_zero):
             ratio = (dy / dx).clamp_min(eps_zero)
-            w_new = torch.exp(theta * torch.log(ratio) + (1.0 - theta) * w_old)
+            w_new = torch.exp(theta * torch.log(ratio) + (1.0 - theta) * torch.log(w_old))
             return w_new.clamp_min(eps_zero)
         return w_old
 
@@ -166,7 +166,23 @@ def solve(
         # TODO
         return False
 
-    def termination_criteria(x_cur: torch.Tensor, y_cur: torch.Tensor, k: int) -> bool:
+    def termination_criteria(x_cur: torch.Tensor, y_cur: torch.Tensor, w_cur: float, k: int,
+                            kkt_best: float, abs_tol: float = 0.1) -> bool:
+        """Check if converged or diverging."""
+        if k < 10:  # Don't terminate too early
+            return False
+
+        kkt = kkt_error_sq(x_cur, y_cur, w_cur)
+
+        # Converged: KKT below absolute tolerance
+        if kkt < abs_tol:
+            return True
+
+        # Diverging: KKT is 10x worse than best seen
+        if kkt > 10.0 * kkt_best:
+            # print(f"Stopping due to divergence: KKT={kkt.item():.3e} > 10*best={kkt_best:.3e}")
+            return True
+
         return False
 
     @torch.no_grad()
@@ -236,11 +252,12 @@ def solve(
 
     x, y = x0.clone(), y0.clone() # current iterate
     x_prev, y_prev = x.clone(), y.clone() # past iterate
-    kkt0 = kkt_error_sq(x0, y0, w)
 
     # initialize candidate at t=0
     x_c, y_c = x.clone(), y.clone()
-    kkt_c = kkt0
+
+    # Track best KKT for termination
+    kkt_best = float('inf')
 
     # Restart parameters (from cuPDLP.jl defaults)
     beta_sufficient = 0.2   # Sufficient progress threshold
@@ -250,12 +267,31 @@ def solve(
     k_global = 0 # global step counter
 
     for n_outer in range(MAX_OUTER_ITERS):
+        # compute KKT of last restart point with current primal weight
+        kkt_last_restart = kkt_error_sq(x, y, w)
+
+        # Update best KKT
+        kkt_best = min(kkt_best, kkt_last_restart.item())
+
+        # if n_outer % 10 == 0 or n_outer < 5:
+        #     print(f"Outer iter {n_outer}: x={x.numpy()}, KKT={kkt_last_restart.item():.3e}, best={kkt_best:.3e}, w={w:.3e}")
+
+        # Check for NaN/Inf
+        if torch.isnan(x).any() or torch.isnan(y).any():
+            print(f"NaN detected at outer iteration {n_outer}!")
+            return x, y
+        if torch.isinf(x).any() or torch.isinf(y).any():
+            print(f"Inf detected at outer iteration {n_outer}!")
+            return x, y
+
         # reset averaging at start of each outer loop
         eta_sum = 0.0
         x_bar, y_bar = x.clone(), y.clone()
+        kkt_c_prev = kkt_last_restart  # Initialize for first iteration
 
         for t in range(MAX_INNER_ITERS):
-            if termination_criteria(x, y, k_global):
+            if termination_criteria(x, y, w, k_global, kkt_best):
+                # print(f"Terminated at iteration {k_global}")
                 return x, y
 
             x, y, eta_used, eta_hat = adaptive_step_pdhg(x, y, w, eta_hat, k_global)
@@ -273,29 +309,19 @@ def solve(
             k_global += 1
 
             # restart criteria (matching cuPDLP.jl logic)
-            cond_i  = (kkt_c_new <= (beta_sufficient**2) * kkt0)
-            cond_ii = (kkt_c_new <= (beta_necessary**2) * kkt0) and (kkt_c_new > kkt_c)
+            cond_i  = (kkt_c_new <= (beta_sufficient**2) * kkt_last_restart)
+            cond_ii = (kkt_c_new <= (beta_necessary**2) * kkt_last_restart) and (t > 0) and (kkt_c_new > kkt_c_prev)
             cond_iii = (t >= beta_artificial * k_global)
 
-            # if n_outer < 3 and (cond_i or cond_ii or cond_iii):
-            #     print(f"  Restart at n={n_outer}, t={t}: cond_i={cond_i}, cond_ii={cond_ii}, cond_iii={cond_iii}")
-            #     print(f"    kkt_c_new={kkt_c_new.item():.3e}, kkt0={kkt0.item():.3e}, kkt_c={kkt_c.item():.3e}")
+            kkt_c_prev = kkt_c_new # s for next iteration
 
             if cond_i or cond_ii or cond_iii:
                 x_c, y_c = x_c_new, y_c_new
-                kkt_c = kkt_c_new
                 break
+        else:
+            x_c, y_c = x_c_new, y_c_new
 
         # restart from candidate
-        # if n_outer < 3:  # Debug first few restarts
-        #     kkt_cur = kkt_error_sq(x, y, w)
-        #     kkt_avg = kkt_error_sq(x_bar, y_bar, w)
-        #     kkt_cand = kkt_error_sq(x_c, y_c, w)
-        #     print(f"Outer iter {n_outer}: KKT_cur={kkt_cur.item():.3e}, KKT_avg={kkt_avg.item():.3e}, KKT_cand={kkt_cand.item():.3e}")
-        #     print(f"  x={x}, y={y}")
-        #     print(f"  x_bar={x_bar}, y_bar={y_bar}")
-        #     print(f"  Restarting to: x={x_c}, y={y_c}")
-
         x, y = x_c, y_c
 
         # primal weight update

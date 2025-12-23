@@ -118,7 +118,9 @@ def solve(
         variable_rescaling *= col_rescale
 
     if verbose:
-        print(f"Rescaling: Ruiz iters={ruiz_iterations}, Pock-Chambolle alpha={pock_chambolle_alpha}")
+        print(f"\nPDLP Solver")
+        print(f"  Problem: {m1} inequalities, {m2} equalities, {n} variables")
+        print(f"  Rescaling: Ruiz iters={ruiz_iterations}, Pock-Chambolle alpha={pock_chambolle_alpha}")
         print(f"  ||K|| after rescaling: {K.norm():.3e}")
 
     # split scaled K, q back into G, h, A, b (for algorithm)
@@ -326,6 +328,9 @@ def solve(
         # compute KKT of last restart point with current primal weight
         kkt_last_restart = kkt_error_sq(x, y, w)
 
+        if verbose and n_outer % 10 == 0:
+            print(f"  Outer iter {n_outer}: KKT error = {torch.sqrt(kkt_last_restart):.3e}")
+
         # reset averaging at start of each outer loop
         eta_sum = 0.0
         x_bar, y_bar = x.clone(), y.clone()
@@ -378,10 +383,13 @@ def solve(
         x_prev, y_prev = x.clone(), y.clone()
 
     # Unscale solution back to original space
-    if verbose:
-        print(f"\nSolution in scaled space: x={x.numpy()}, y={y.numpy()}")
     x_orig = x / variable_rescaling
     y_orig = y / constraint_rescaling
+
     if verbose:
-        print(f"Solution in original space: x={x_orig.numpy()}, y={y_orig.numpy()}")
+        status = "converged" if converged else f"max iterations ({MAX_OUTER_ITERS})"
+        print(f"\n  Status: {status} after {k_global} total iterations")
+        print(f"  Primal objective: {(c_orig @ x_orig).item():.6e}")
+        print(f"  Dual objective: {(q_orig @ y_orig).item():.6e}")
+
     return x_orig, y_orig

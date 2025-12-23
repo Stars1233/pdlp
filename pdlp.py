@@ -156,7 +156,7 @@ def solve(
         return w_old
 
     @torch.no_grad()
-    def compute_lambda_for_box(x: torch.Tensor, g: torch.Tensor, lower_bound: torch.Tensor, upper_bound: torch.Tensor) -> torch.Tensor:
+    def compute_lambda_for_box(x: torch.Tensor, g: torch.Tensor, lower: torch.Tensor, upper: torch.Tensor) -> torch.Tensor:
         """
         Computes lambda, the normal-cone component for box constraints at x.
         g = c - K^t y
@@ -164,11 +164,11 @@ def solve(
         """
         lam = torch.zeros_like(x)
 
-        fin_l = torch.isfinite(lower_bound)
-        fin_u = torch.isfinite(upper_bound)
+        fin_l = torch.isfinite(lower)
+        fin_u = torch.isfinite(upper)
 
-        at_l = fin_l & (x <= lower_bound + eps_zero)
-        at_u = fin_u & (x >= upper_bound - eps_zero)
+        at_l = fin_l & (x <= lower + eps_zero)
+        at_u = fin_u & (x >= upper - eps_zero)
 
         # handle numerically-tight boxes where both flags fire
         both = at_l & at_u

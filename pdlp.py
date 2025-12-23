@@ -32,6 +32,7 @@ def solve(
     theta: float = 0.5,
     l_inf_ruiz_iterations: int = 10,  # Match cuPDLP.jl default
     pock_chambolle_alpha: float = 1.0,  # Match cuPDLP.jl default
+    eps_tol: float = 1e-8,
     verbose: bool = False,
 ):
     # -----------------------------
@@ -55,6 +56,12 @@ def solve(
     # Stack constraints
     K = torch.cat([G, A], dim=0) # (m, n)
     q = torch.cat([h, b], dim=0) # (m,)
+
+    # Save original problem data for termination checks
+    G_orig, h_orig = G.clone(), h.clone()
+    A_orig, b_orig = A.clone(), b.clone()
+    c_orig, l_orig, u_orig = c.clone(), l.clone(), u.clone()
+    K_orig, q_orig = K.clone(), q.clone()
 
     # -----------------------------
     # Rescaling / Preconditioning
@@ -184,38 +191,58 @@ def solve(
         return (x, y) if (kkt_z < kkt_b) else (x_bar, y_bar)
 
     @torch.no_grad()
-    def termination_criteria(x, y, eps=1e-6):
-        # 1) build g and lambda
-        g = c - (K.T @ y)                 # (n,)
-        lam = compute_lambda_for_box(x, g)
+    def termination_criteria(x_scaled, y_scaled):
+        """Check termination on ORIGINAL problem (not rescaled)."""
+        # Unscale solution back to original space
+        x_orig = x_scaled / variable_rescaling
+        y_orig = y_scaled / constraint_rescaling
 
-        # split lambda into + and - (where lambda^- is nonnegative)
-        lam_pos = torch.clamp(lam, min=0.0)     # λ^+
-        lam_minus = torch.clamp(-lam, min=0.0)  # λ^- ≥ 0
+        # Compute lambda for box constraints in original space
+        g_orig = c_orig - (K_orig.T @ y_orig)  # (n,)
 
-        fin_l = torch.isfinite(l)
-        fin_u = torch.isfinite(u)
+        # Compute lambda (normal cone component for box constraints)
+        lam = torch.zeros_like(x_orig)
+        fin_l = torch.isfinite(l_orig)
+        fin_u = torch.isfinite(u_orig)
 
-        l_term = (l[fin_l] * lam_pos[fin_l]).sum()
-        u_term = (u[fin_u] * lam_minus[fin_u]).sum()
+        at_l = fin_l & (x_orig <= l_orig + eps_bound)
+        at_u = fin_u & (x_orig >= u_orig - eps_bound)
 
-        qTy = (q @ y)
-        cTx = (c @ x)
+        # Handle tight boxes
+        both = at_l & at_u
+        if both.any():
+            dl = (x_orig - l_orig).abs()
+            du = (u_orig - x_orig).abs()
+            at_l = (at_l & ~both) | (both & (dl <= du))
+            at_u = (at_u & ~both) | (both & (du < dl))
+
+        lam[at_l] = torch.clamp(g_orig[at_l], min=0.0)
+        lam[at_u] = torch.clamp(g_orig[at_u], max=0.0)
+
+        # Split lambda into + and -
+        lam_pos = torch.clamp(lam, min=0.0)
+        lam_minus = torch.clamp(-lam, min=0.0)
+
+        l_term = (l_orig[fin_l] * lam_pos[fin_l]).sum()
+        u_term = (u_orig[fin_u] * lam_minus[fin_u]).sum()
+
+        qTy = (q_orig @ y_orig)
+        cTx = (c_orig @ x_orig)
 
         # ---- (i) relative gap ----
         gap_num = torch.abs(qTy + l_term - u_term - cTx)
         gap_den = 1.0 + torch.abs(qTy + l_term - u_term) + torch.abs(cTx)
-        gap_ok = (gap_num / gap_den) <= eps
+        gap_ok = (gap_num / gap_den) <= eps_tol
 
         # ---- (ii) primal feasibility ----
-        r_eq = b - (A @ x)                   # (m2,)
-        r_ineq = torch.clamp(h - (G @ x), min=0.0)  # (m1,)
+        r_eq = b_orig - (A_orig @ x_orig)
+        r_ineq = torch.clamp(h_orig - (G_orig @ x_orig), min=0.0)
         feas = torch.sqrt((r_eq @ r_eq) + (r_ineq @ r_ineq))
-        feas_ok = feas <= eps * (1.0 + torch.linalg.norm(q))
+        feas_ok = feas <= eps_tol * (1.0 + torch.linalg.norm(q_orig))
 
         # ---- (iii) stationarity ----
-        stat = torch.linalg.norm(g - lam)
-        stat_ok = stat <= eps * (1.0 + torch.linalg.norm(c))
+        stat = torch.linalg.norm(g_orig - lam)
+        stat_ok = stat <= eps_tol * (1.0 + torch.linalg.norm(c_orig))
 
         return bool(gap_ok and feas_ok and stat_ok)
 

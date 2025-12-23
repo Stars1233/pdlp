@@ -29,7 +29,7 @@ def solve(
     MAX_OUTER_ITERS: int = 100,
     MAX_INNER_ITERS: int = 100,
     MAX_BACKTRACK: int = 50,
-    theta: float = 0.5,
+    primal_weight_update_smoothing: float = 0.5,  # 0=no update, 1=full update to new ratio
     l_inf_ruiz_iterations: int = 10,  # Match cuPDLP.jl default
     pock_chambolle_alpha: float = 1.0,  # Match cuPDLP.jl default
     eps_tol: float = 1e-8,
@@ -116,7 +116,8 @@ def solve(
 
         if (dx > eps_zero) and (dy > eps_zero):
             ratio = (dy / dx).clamp_min(eps_zero)
-            w_new = torch.exp(theta * torch.log(ratio) + (1.0 - theta) * torch.log(w_old))
+            w_new = torch.exp(primal_weight_update_smoothing * torch.log(ratio) +
+                            (1.0 - primal_weight_update_smoothing) * torch.log(w_old))
             return w_new.clamp_min(eps_zero)
         return w_old
 

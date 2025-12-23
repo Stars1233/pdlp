@@ -81,6 +81,63 @@ def solve(
     K_orig, q_orig = K.clone(), q.clone()
 
     # -----------------------------
+    # Trivial cases: no variables or no constraints
+    # -----------------------------
+    if n == 0:
+        # No variables: check if constraints are satisfiable
+        # G x >= h becomes 0 >= h, so need h <= 0
+        # A x = b becomes 0 = b, so need b = 0
+        feasible = torch.all(h <= eps_zero) and torch.all(b.abs() <= eps_zero)
+        if feasible:
+            if verbose:
+                print("\nPDLP Solver")
+                print(f"  Problem: {m1} inequalities, {m2} equalities, {n} variables")
+                print(f"\n  Status: converged (trivial, no variables)")
+                print(f"  Primal objective: 0.000000e+00")
+            return torch.zeros(0, device=device, dtype=dtype), torch.zeros(m, device=device, dtype=dtype)
+        else:
+            if verbose:
+                print("\nPDLP Solver")
+                print(f"  Problem: {m1} inequalities, {m2} equalities, {n} variables")
+                print(f"\n  Status: PRIMAL INFEASIBLE")
+                print(f"    No variables but constraints cannot be satisfied")
+            return torch.zeros(0, device=device, dtype=dtype), torch.zeros(m, device=device, dtype=dtype)
+
+    if m == 0:
+        # No constraints means we just minimize c^T x subject to l <= x <= u
+        # If any c[i] < 0 and u[i] = inf, problem is unbounded
+        # Otherwise optimal is x[i] = l[i] if c[i] >= 0, x[i] = u[i] if c[i] < 0
+        unbounded = False
+        x_sol = l.clone()
+        for i in range(n):
+            if c[i] < -eps_zero:
+                if torch.isinf(u[i]):
+                    unbounded = True
+                    break
+                else:
+                    x_sol[i] = u[i]
+            elif c[i] > eps_zero:
+                x_sol[i] = l[i]
+            else:  # c[i] ≈ 0
+                x_sol[i] = l[i]
+
+        if unbounded:
+            if verbose:
+                print("\nPDLP Solver")
+                print(f"  Problem: {m1} inequalities, {m2} equalities, {n} variables")
+                print(f"\n  Status: DUAL INFEASIBLE (primal unbounded)")
+                print(f"    No constraints and negative objective coefficient with unbounded variable")
+            return x_sol, torch.zeros(0, device=device, dtype=dtype)
+        else:
+            if verbose:
+                print("\nPDLP Solver")
+                print(f"  Problem: {m1} inequalities, {m2} equalities, {n} variables")
+                obj = (c @ x_sol).item()
+                print(f"\n  Status: converged (trivial, no constraints)")
+                print(f"  Primal objective: {obj:.6e}")
+            return x_sol, torch.zeros(0, device=device, dtype=dtype)
+
+    # -----------------------------
     # Rescaling / Preconditioning
     # -----------------------------
     constraint_rescaling = torch.ones(m, device=device, dtype=dtype)
@@ -90,6 +147,7 @@ def solve(
     for _ in range(ruiz_iterations):
         # Column rescaling: sqrt(max(|K[:,j]|, |c[j]|))
         col_rescale = torch.sqrt(torch.maximum(K.abs().max(dim=0)[0], c.abs())).clamp_min(eps_zero)
+
         # Row rescaling: sqrt(max(|K[i,:]|))
         row_rescale = torch.sqrt(K.abs().max(dim=1)[0]).clamp_min(eps_zero)
 
@@ -323,14 +381,28 @@ def solve(
 
     k_global = 0 # global step counter
     converged = False
+    x_last_valid, y_last_valid = x.clone(), y.clone()  # Save last valid iterates
+    x_unscaled_last, y_unscaled_last = x / variable_rescaling, y / constraint_rescaling  # For infeasibility detection
 
     for n_outer in range(MAX_OUTER_ITERS):
+        # Check for NaN/Inf early
+        if torch.isnan(x).any() or torch.isnan(y).any() or torch.isinf(x).any() or torch.isinf(y).any():
+            if verbose:
+                print(f"  NaN/Inf detected at outer iteration {n_outer}, checking for infeasibility...")
+            # Use last valid iterates
+            x, y = x_last_valid, y_last_valid
+            break
+
         # compute KKT of last restart point with current primal weight
         kkt_last_restart = kkt_error_sq(x, y, w)
 
+        # Save unscaled values for infeasibility detection (do this every iteration, not just for printing)
+        x_unscaled = x / variable_rescaling
+        y_unscaled = y / constraint_rescaling
+        if not (torch.isnan(x_unscaled).any() or torch.isnan(y_unscaled).any() or torch.isinf(x_unscaled).any() or torch.isinf(y_unscaled).any()):
+            x_unscaled_last, y_unscaled_last = x_unscaled.clone(), y_unscaled.clone()
+
         if verbose and n_outer % 10 == 0:
-            x_unscaled = x / variable_rescaling
-            y_unscaled = y / constraint_rescaling
             primal_obj = (c_orig @ x_unscaled).item()
             dual_obj = (q_orig @ y_unscaled).item()
             kkt_err = torch.sqrt(kkt_last_restart).item()
@@ -378,6 +450,9 @@ def solve(
         # break out of outer loop if converged
         if converged: break
 
+        # Save last valid iterates BEFORE restart (x, y are restart points here)
+        x_last_valid, y_last_valid = x.clone(), y.clone()
+
         # restart from candidate
         x, y = x_c, y_c
 
@@ -387,13 +462,54 @@ def solve(
         # store previous restart start
         x_prev, y_prev = x.clone(), y.clone()
 
-    # Unscale solution back to original space
-    x_orig = x / variable_rescaling
-    y_orig = y / constraint_rescaling
+    # Use last valid unscaled values (saved before NaN occurred)
+    x_orig = x_unscaled_last
+    y_orig = y_unscaled_last
 
-    if verbose:
-        status = "converged" if converged else f"max iterations ({MAX_OUTER_ITERS})"
-        print(f"\n  Status: {status} after {k_global} total iterations")
+    # Check for infeasibility/unboundedness if not converged
+    status = "optimal" if converged else "max_iterations"
+
+    if not converged:
+        # Check for primal infeasibility (Farkas certificate via dual ray)
+        dual_norm_inf = torch.max(y_orig.abs())
+        if dual_norm_inf > eps_zero:
+            y_ray = y_orig / dual_norm_inf
+            dual_ray_obj = (q_orig @ y_ray).item()
+
+            if dual_ray_obj > 0:
+                # Check dual residual with objective = 0
+                dual_residual = torch.linalg.norm(K_orig.T @ y_ray).item()
+                relative_infeas = dual_residual / dual_ray_obj
+
+                if relative_infeas < 1e-6:  # eps_primal_infeasible
+                    status = "primal_infeasible"
+                    if verbose:
+                        print(f"\n  Status: PRIMAL INFEASIBLE")
+                        print(f"    Farkas certificate: ||K^T y_ray|| / (q^T y_ray) = {relative_infeas:.3e}")
+
+        # Check for dual infeasibility (primal unbounded via primal ray)
+        if status == "max_iterations":
+            primal_norm_inf = torch.max(x_orig.abs())
+            if primal_norm_inf > eps_zero:
+                x_ray = x_orig / primal_norm_inf
+                primal_ray_obj = (c_orig @ x_ray).item()
+
+                if primal_ray_obj < 0:
+                    # Check primal residual with RHS = 0
+                    primal_residual_eq = torch.linalg.norm(A_orig @ x_ray).item()
+                    primal_residual_ineq = torch.linalg.norm(torch.clamp(-(G_orig @ x_ray), min=0.0)).item()
+                    max_primal_residual = max(primal_residual_eq, primal_residual_ineq)
+                    relative_infeas = max_primal_residual / (-primal_ray_obj)
+
+                    if relative_infeas < 1e-6:  # eps_dual_infeasible
+                        status = "dual_infeasible"
+                        if verbose:
+                            print(f"\n  Status: DUAL INFEASIBLE (primal unbounded)")
+                            print(f"    Primal ray: max_residual / (-c^T x_ray) = {relative_infeas:.3e}")
+
+    if verbose and status in ["optimal", "max_iterations"]:
+        status_msg = "converged" if converged else f"max iterations ({MAX_OUTER_ITERS})"
+        print(f"\n  Status: {status_msg} after {k_global} total iterations")
         print(f"  Primal objective: {(c_orig @ x_orig).item():.6e}")
         print(f"  Dual objective: {(q_orig @ y_orig).item():.6e}")
 

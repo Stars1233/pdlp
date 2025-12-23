@@ -32,7 +32,7 @@ def test_problem_1():
     print("  Bounds: 0 <= x1, x2 <= 10")
     print("  Expected: x = [1.0, 0.0], obj = 1.0")
 
-    x_sol, y_sol = solve(G, A, c, h, b, l, u, verbose=False)
+    x_sol, y_sol = solve(G, A, c, h, b, l, u, verbose=True)
 
     expected = torch.tensor([1.0, 0.0])
     error = torch.norm(x_sol - expected).item()

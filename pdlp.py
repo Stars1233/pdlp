@@ -303,9 +303,9 @@ def solve(
     y0 = torch.zeros(m, device=device, dtype=dtype)
 
     # step size 1/||K||_inf
-    K_inf = K.abs().sum(dim=1).max().clamp_min(eps_zero)
-    eta_hat = (1.0 / K_inf).to(device=device, dtype=dtype)
+    eta_hat = (1.0 / K.abs().sum(dim=1).max().clamp_min(eps_zero)).to(device=device, dtype=dtype)
 
+    # initial weight
     w = (torch.linalg.norm(c) / torch.linalg.norm(q)).clamp_min(eps_zero)
 
     x, y = x0.clone(), y0.clone() # current iterate

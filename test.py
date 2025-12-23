@@ -32,7 +32,7 @@ def test_problem_1():
     print("  Bounds: 0 <= x1, x2 <= 10")
     print("  Expected: x = [1.0, 0.0], obj = 1.0")
 
-    x_sol, y_sol = solve(G, A, c, h, b, l, u, verbose=True)
+    x_sol, y_sol, status, info = solve(G, A, c, h, b, l, u, verbose=True)
 
     expected = torch.tensor([1.0, 0.0])
     error = torch.norm(x_sol - expected).item()
@@ -72,7 +72,7 @@ def test_problem_2():
     print("  Bounds: 0 <= x1, x2 <= 10")
     print("  Expected: x = [0.0, 1.5], obj = 1.5")
 
-    x_sol, y_sol = solve(G, A, c, h, b, l, u, verbose=False)
+    x_sol, y_sol, status, info = solve(G, A, c, h, b, l, u, verbose=False)
 
     expected = torch.tensor([0.0, 1.5])
     error = torch.norm(x_sol - expected).item()
@@ -118,7 +118,7 @@ def test_problem_3():
     print("  Bounds: 0 <= xi <= 10")
     print("  Expected: obj = 3.0")
 
-    x_sol, y_sol = solve(G, A, c, h, b, l, u, verbose=False)
+    x_sol, y_sol, status, info = solve(G, A, c, h, b, l, u, verbose=False)
 
     expected_obj = 3.0
     obj = (c @ x_sol).item()
@@ -158,7 +158,7 @@ def test_problem_4():
     print("  Bounds: x1 >= 0, x2 unbounded")
     print("  Expected: x = [0.0, 2.0], obj = 2.0")
 
-    x_sol, y_sol = solve(G, A, c, h, b, l, u, verbose=False)
+    x_sol, y_sol, status, info = solve(G, A, c, h, b, l, u, verbose=False)
 
     expected = torch.tensor([0.0, 2.0])
     error = torch.norm(x_sol - expected).item()
@@ -198,7 +198,7 @@ def test_problem_5():
     print("  Bounds: 0 <= x1, x2 <= 5")
     print("  Expected: x = [5.0, 5.0], obj = -10.0")
 
-    x_sol, y_sol = solve(G, A, c, h, b, l, u, verbose=False)
+    x_sol, y_sol, status, info = solve(G, A, c, h, b, l, u, verbose=False)
 
     expected = torch.tensor([5.0, 5.0])
     error = torch.norm(x_sol - expected).item()
@@ -239,7 +239,7 @@ def test_problem_6():
     print("  Bounds: 0 <= xi <= 10")
     print("  Expected: x = [5.0, 0.0, 0.0], obj = 5.0")
 
-    x_sol, y_sol = solve(G, A, c, h, b, l, u, verbose=False)
+    x_sol, y_sol, status, info = solve(G, A, c, h, b, l, u, verbose=False)
 
     expected = torch.tensor([5.0, 0.0, 0.0])
     error = torch.norm(x_sol - expected).item()
@@ -281,7 +281,7 @@ def test_problem_7():
     print("  Constraints: x1 + x2 >= 10, x1 + x2 <= 5")
     print("  Expected: PRIMAL INFEASIBLE")
 
-    x_sol, y_sol = solve(G, A, c, h, b, l, u, verbose=True, MAX_OUTER_ITERS=100)
+    x_sol, y_sol, status, info = solve(G, A, c, h, b, l, u, verbose=True, MAX_OUTER_ITERS=100)
 
     print(f"  {'PASS' if True else 'FAIL'}")  # Always pass, just checking detection
     return True
@@ -316,7 +316,7 @@ def test_problem_8():
     print("  Bounds: x1, x2 >= 0, no upper bounds")
     print("  Expected: DUAL INFEASIBLE (primal unbounded)")
 
-    x_sol, y_sol = solve(G, A, c, h, b, l, u, verbose=True, MAX_OUTER_ITERS=100)
+    x_sol, y_sol, status, info = solve(G, A, c, h, b, l, u, verbose=True, MAX_OUTER_ITERS=100)
 
     print(f"  {'PASS' if True else 'FAIL'}")  # Always pass, just checking detection
     return True

@@ -329,7 +329,12 @@ def solve(
         kkt_last_restart = kkt_error_sq(x, y, w)
 
         if verbose and n_outer % 10 == 0:
-            print(f"  Outer iter {n_outer}: KKT error = {torch.sqrt(kkt_last_restart):.3e}")
+            x_unscaled = x / variable_rescaling
+            y_unscaled = y / constraint_rescaling
+            primal_obj = (c_orig @ x_unscaled).item()
+            dual_obj = (q_orig @ y_unscaled).item()
+            kkt_err = torch.sqrt(kkt_last_restart).item()
+            print(f"  Iter {n_outer:3d}: primal_obj = {primal_obj:+.6e}, dual_obj = {dual_obj:+.6e}, KKT = {kkt_err:.3e}")
 
         # reset averaging at start of each outer loop
         eta_sum = 0.0

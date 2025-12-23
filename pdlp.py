@@ -15,7 +15,6 @@ X = {x : l <= x <= u}
 Y = {y : y[:m1] >= 0} (y[m1:] free)
 """
 
-
 def solve(
     G: torch.Tensor,
     A: torch.Tensor,
@@ -24,7 +23,6 @@ def solve(
     b: torch.Tensor,
     l: torch.Tensor,
     u: torch.Tensor,
-    *,
     MAX_OUTER_ITERS: int = 100,
     MAX_INNER_ITERS: int = 100,
     MAX_BACKTRACK: int = 50,
@@ -118,15 +116,12 @@ def solve(
         return y2
 
     @torch.no_grad()
-    def initialize_primal_weight() -> torch.Tensor:
-        return (torch.linalg.norm(c) / torch.linalg.norm(q)).clamp_min(eps_zero)
-
-    @torch.no_grad()
     def primal_weight_update(
         x_new: torch.Tensor, y_new: torch.Tensor,
         x_old: torch.Tensor, y_old: torch.Tensor,
         w_old: torch.Tensor,
     ) -> torch.Tensor:
+        """Updates primal weight"""
         dx = torch.linalg.norm(x_new - x_old)
         dy = torch.linalg.norm(y_new - y_old)
 
@@ -160,8 +155,8 @@ def solve(
             at_l = (at_l & ~both) | (both & (dl <= du))
             at_u = (at_u & ~both) | (both & (du < dl))
 
-        lam[at_l] = torch.clamp(g[at_l], min=0.0)  # lambda^+ at lower bound
-        lam[at_u] = torch.clamp(g[at_u], max=0.0)  # lamda^- (negative) at upper bound
+        lam[at_l] = torch.clamp(g[at_l], min=0.0) # lambda^+ at lower bound
+        lam[at_u] = torch.clamp(g[at_u], max=0.0) # lamda^- at upper bound
         return lam
 
     @torch.no_grad()
@@ -218,18 +213,18 @@ def solve(
         qTy = (q_orig @ y_orig)
         cTx = (c_orig @ x_orig)
 
-        # ---- (i) relative gap ----
+        # condition (1) primal gap
         gap_num = torch.abs(qTy + l_term - u_term - cTx)
         gap_den = 1.0 + torch.abs(qTy + l_term - u_term) + torch.abs(cTx)
         gap_ok = (gap_num / gap_den) <= eps_tol
 
-        # ---- (ii) primal feasibility ----
+        # condition (2) primal feasibility
         r_eq = b_orig - (A_orig @ x_orig)
         r_ineq = torch.clamp(h_orig - (G_orig @ x_orig), min=0.0)
         feas = torch.sqrt((r_eq @ r_eq) + (r_ineq @ r_ineq))
         feas_ok = feas <= eps_tol * (1.0 + torch.linalg.norm(q_orig))
 
-        # ---- (iii) stationarity ----
+        # condition (3) stationarity
         stat = torch.linalg.norm(g_orig - lam)
         stat_ok = stat <= eps_tol * (1.0 + torch.linalg.norm(c_orig))
 
@@ -267,7 +262,6 @@ def solve(
             else:
                 bar_eta = num / denom
 
-            # eta' from paper
             eta_p = torch.minimum(fac1 * bar_eta, fac2 * eta).clamp_min(eps_zero)
 
             if eta <= bar_eta:
@@ -291,7 +285,7 @@ def solve(
     K_inf = K.abs().sum(dim=1).max().clamp_min(eps_zero)
     eta_hat = (1.0 / K_inf).to(device=device, dtype=dtype)
 
-    w = initialize_primal_weight()
+    w = (torch.linalg.norm(c) / torch.linalg.norm(q)).clamp_min(eps_zero)
 
     x, y = x0.clone(), y0.clone() # current iterate
     x_prev, y_prev = x.clone(), y.clone() # past iterate

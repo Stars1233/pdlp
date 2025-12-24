@@ -177,13 +177,13 @@ def solve(
 
     # Ruiz rescaling (L-infinity equilibration)
     for _ in range(ruiz_iterations):
-        # Column rescaling: sqrt(max(|K[:,j]|, |c[j]|))
+        # column rescaling: sqrt(max(|K[:,j]|, |c[j]|))
         col_rescale = torch.sqrt(torch.maximum(K.abs().max(dim=0)[0], c.abs())).clamp_min(eps_zero)
 
-        # Row rescaling: sqrt(max(|K[i,:]|))
+        # row rescaling: sqrt(max(|K[i,:]|))
         row_rescale = torch.sqrt(K.abs().max(dim=1)[0]).clamp_min(eps_zero)
 
-        # Apply rescaling
+        # apply rescaling
         c, l, u = c / col_rescale, l * col_rescale, u * col_rescale
         q = q / row_rescale
         K = K / row_rescale.unsqueeze(1) / col_rescale.unsqueeze(0)

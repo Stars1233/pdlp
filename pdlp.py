@@ -48,13 +48,6 @@ def solve(
         y_sol: Dual solution (m1 + m2,) where y[:m1] are inequality duals, y[m1:] are equality duals
         status: "optimal", "primal_infeasible", "dual_infeasible", or "max_iterations"
         info: Dict with certificate details (ray, certificate_quality) if infeasible/unbounded, else empty
-
-    Notes:
-        - Internally stacks constraints as K = [G; A] and q = [h; b]
-        - Applies Ruiz + Pock-Chambolle rescaling for numerical stability
-        - Uses adaptive step sizing with backtracking line search
-        - Implements restart schemes based on KKT progress
-        - Termination criteria checked on original (unscaled) problem
     """
     # -----------------------------
     # Shape checks / setup

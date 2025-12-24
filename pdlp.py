@@ -229,8 +229,8 @@ def solve(
         fin_l = torch.isfinite(lower)
         fin_u = torch.isfinite(upper)
 
-        at_l = fin_l & (x <= lower + eps_zero)
-        at_u = fin_u & (x >= upper - eps_zero)
+        at_l = fin_l & (x <= lower + eps_tol)
+        at_u = fin_u & (x >= upper - eps_tol)
 
         # handle numerically-tight boxes where both flags fire
         both = at_l & at_u
@@ -243,6 +243,26 @@ def solve(
         lam[at_l] = torch.clamp(g[at_l], min=0.0) # lambda^+ at lower bound
         lam[at_u] = torch.clamp(g[at_u], max=0.0) # lamda^- at upper bound
         return lam
+
+    @torch.no_grad()
+    def compute_dual_objective(x: torch.Tensor, y: torch.Tensor, c: torch.Tensor,
+                              K: torch.Tensor, q: torch.Tensor,
+                              lower: torch.Tensor, upper: torch.Tensor) -> torch.Tensor:
+        """
+        Computes the full dual objective: q^T y + l^T λ+ - u^T λ-
+        where λ are the reduced costs (dual multipliers on bounds).
+        """
+        g = c - (K.T @ y)
+        lam = compute_lambda_for_box(x, g, lower, upper)
+        lam_pos = torch.clamp(lam, min=0.0)
+        lam_neg = torch.clamp(-lam, min=0.0)
+
+        fin_l = torch.isfinite(lower)
+        fin_u = torch.isfinite(upper)
+        l_term = (lower[fin_l] * lam_pos[fin_l]).sum()
+        u_term = (upper[fin_u] * lam_neg[fin_u]).sum()
+
+        return (q @ y) + l_term - u_term
 
     @torch.no_grad()
     def kkt_error_sq(x: torch.Tensor, y: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
@@ -306,22 +326,14 @@ def solve(
                     return False, "dual_infeasible", {"ray": x_ray, "certificate_quality": relative_infeas}
 
         # Check for optimality
+        dual_obj = compute_dual_objective(x_orig, y_orig, c_orig, K_orig, q_orig, l_orig, u_orig)
+        primal_obj = c_orig @ x_orig
+
         g_orig = c_orig - (K_orig.T @ y_orig)
         lam = compute_lambda_for_box(x_orig, g_orig, l_orig, u_orig)
 
-        lam_pos = torch.clamp(lam, min=0.0)
-        lam_minus = torch.clamp(-lam, min=0.0)
-
-        fin_l = torch.isfinite(l_orig)
-        fin_u = torch.isfinite(u_orig)
-        l_term = (l_orig[fin_l] * lam_pos[fin_l]).sum()
-        u_term = (u_orig[fin_u] * lam_minus[fin_u]).sum()
-
-        qTy = (q_orig @ y_orig)
-        cTx = (c_orig @ x_orig)
-
-        gap_num = torch.abs(qTy + l_term - u_term - cTx)
-        gap_den = 1.0 + torch.abs(qTy + l_term - u_term) + torch.abs(cTx)
+        gap_num = torch.abs(dual_obj - primal_obj)
+        gap_den = 1.0 + torch.abs(dual_obj) + torch.abs(primal_obj)
         gap_ok = (gap_num / gap_den) <= eps_tol
 
         r_eq = b_orig - (A_orig @ x_orig)
@@ -400,7 +412,7 @@ def solve(
     # restart parameters
     beta_sufficient = 0.2 # used for sufficient progress condition
     beta_necessary = 0.8 # used for necessary progress condition
-    beta_artificial = 0.36 # used for artifical restart condition
+    beta_artificial = 0.36 # used for artificial restart condition
 
     k_global = 0 # global step counter
     converged = False
@@ -419,9 +431,10 @@ def solve(
 
         if verbose and n_outer % 10 == 0:
             primal_obj = (c_orig @ x_unscaled).item()
-            dual_obj = (q_orig @ y_unscaled).item()
+            dual_obj = compute_dual_objective(x_unscaled, y_unscaled, c_orig, K_orig, q_orig, l_orig, u_orig).item()
             kkt_err = torch.sqrt(kkt_last_restart).item()
-            print(f"  Iter {n_outer:3d}: primal_obj = {primal_obj:+.6e}, dual_obj = {dual_obj:+.6e}, KKT = {kkt_err:.3e}")
+            gap = abs(primal_obj - dual_obj)
+            print(f"  Iter {n_outer:3d}: primal_obj = {primal_obj:+.6e}, dual_obj = {dual_obj:+.6e}, gap = {gap:.3e}, KKT = {kkt_err:.3e}")
 
         # reset averaging at start of each outer loop
         eta_sum = 0.0
@@ -506,8 +519,12 @@ def solve(
             print(f"      Relative certificate quality: {info['certificate_quality']:.3e}")
         elif status in ["optimal", "max_iterations"]:
             status_msg = "converged" if converged else f"max iterations ({MAX_OUTER_ITERS})"
+            primal_obj = (c_orig @ x_orig).item()
+            dual_obj = compute_dual_objective(x_orig, y_orig, c_orig, K_orig, q_orig, l_orig, u_orig).item()
+            gap = abs(primal_obj - dual_obj)
             print(f"\n  Status: {status_msg} after {k_global} total iterations")
-            print(f"  Primal objective: {(c_orig @ x_orig).item():.6e}")
-            print(f"  Dual objective: {(q_orig @ y_orig).item():.6e}")
+            print(f"  Primal objective: {primal_obj:.6e}")
+            print(f"  Dual objective: {dual_obj:.6e}")
+            print(f"  Duality gap: {gap:.6e}")
 
     return x_orig, y_orig, status, info

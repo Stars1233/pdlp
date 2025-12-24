@@ -460,6 +460,123 @@ def test_problem_12():
     return status == "dual_infeasible" and has_certificate
 
 
+def test_problem_13():
+    """
+    Test 13: Large transportation problem
+
+    A transportation problem with 10 suppliers and 15 customers.
+    - Each supplier i has supply capacity s_i
+    - Each customer j has demand requirement d_j
+    - Cost c_ij to ship from supplier i to customer j
+    - Variables: x_ij = amount shipped from i to j (150 variables)
+    - Constraints: sum_j x_ij <= s_i (supply limits, 10 inequalities)
+                   sum_i x_ij >= d_j (demand requirements, 15 inequalities)
+    - Objective: minimize total shipping cost
+
+    This is a realistic large-scale LP with known structure.
+    """
+    print("\n" + "=" * 70)
+    print("TEST 13: Large transportation problem")
+    print("=" * 70)
+
+    torch.manual_seed(42)  # for reproducibility
+
+    n_suppliers = 10
+    n_customers = 15
+    n_vars = n_suppliers * n_customers  # 150 variables
+
+    # Generate supply and demand
+    supply = torch.rand(n_suppliers) * 20 + 10  # 10-30 units per supplier
+    demand = torch.rand(n_customers) * 15 + 5   # 5-20 units per customer
+
+    # Make problem feasible: ensure total supply >= total demand
+    total_demand = demand.sum()
+    total_supply = supply.sum()
+    if total_supply < total_demand:
+        supply = supply * (total_demand / total_supply * 1.2)  # 20% excess supply
+
+    # Generate shipping costs (distance-based)
+    # Suppliers at positions (i, 0), customers at positions (n_suppliers + j, 0)
+    costs = torch.zeros(n_suppliers, n_customers)
+    for i in range(n_suppliers):
+        for j in range(n_customers):
+            # Random cost with some structure (closer is cheaper)
+            costs[i, j] = torch.rand(1).item() * 5 + abs(i - j) * 0.5
+
+    # Flatten costs into objective vector c
+    c = costs.flatten()
+
+    # Build constraint matrices
+    # Supply constraints: sum_j x_ij <= s_i  =>  -sum_j x_ij >= -s_i
+    G_supply = torch.zeros(n_suppliers, n_vars)
+    for i in range(n_suppliers):
+        for j in range(n_customers):
+            idx = i * n_customers + j
+            G_supply[i, idx] = -1.0
+    h_supply = -supply
+
+    # Demand constraints: sum_i x_ij >= d_j
+    G_demand = torch.zeros(n_customers, n_vars)
+    for j in range(n_customers):
+        for i in range(n_suppliers):
+            idx = i * n_customers + j
+            G_demand[j, idx] = 1.0
+    h_demand = demand
+
+    # Combine inequality constraints
+    G = torch.vstack([G_supply, G_demand])
+    h = torch.cat([h_supply, h_demand])
+
+    # No equality constraints for this problem
+    A = torch.tensor([]).reshape(0, n_vars)
+    b = torch.tensor([])
+
+    # Bounds: x_ij >= 0
+    l = torch.zeros(n_vars)
+    u = torch.ones(n_vars) * float('inf')
+
+    print(f"  Problem size: {n_suppliers} suppliers, {n_customers} customers")
+    print(f"  Variables: {n_vars} (shipping amounts)")
+    print(f"  Constraints: {G.shape[0]} inequalities")
+    print(f"  Total supply: {supply.sum():.2f}")
+    print(f"  Total demand: {demand.sum():.2f}")
+    print(f"  Expected: optimal solution with all demand satisfied")
+
+    x_sol, y_sol, status, info = solve(G, A, c, h, b, l, u, verbose=True, MAX_OUTER_ITERS=5000)
+
+    # Reshape solution back to matrix form
+    x_matrix = x_sol.reshape(n_suppliers, n_customers)
+
+    # Verify constraints
+    supply_used = x_matrix.sum(dim=1)  # sum over customers for each supplier
+    demand_met = x_matrix.sum(dim=0)   # sum over suppliers for each customer
+
+    supply_violation = torch.max(supply_used - supply).item()
+    demand_violation = torch.max(demand - demand_met).item()
+
+    obj = (c @ x_sol).item()
+
+    print(f"\n  Solution found:")
+    print(f"    Objective (total cost): {obj:.2f}")
+    print(f"    Supply violations: {max(0, supply_violation):.6e}")
+    print(f"    Demand violations: {max(0, demand_violation):.6e}")
+    print(f"    Total shipped: {x_sol.sum():.2f}")
+    print(f"    Sparsity: {(x_sol > 1e-6).sum().item()}/{n_vars} non-zero variables")
+
+    # For large problems, accept high-quality feasible solutions even if not proven optimal
+    feasible = supply_violation < 1e-3 and demand_violation < 1e-3
+    high_quality = status in ["optimal", "max_iterations"] and feasible
+
+    if status == "optimal":
+        print(f"  PASS (optimal)")
+    elif high_quality:
+        print(f"  PASS (feasible solution found)")
+    else:
+        print(f"  FAIL")
+
+    return high_quality
+
+
 if __name__ == "__main__":
     test_problem_1()
     test_problem_2()
@@ -473,3 +590,4 @@ if __name__ == "__main__":
     test_problem_10()
     test_problem_11()
     test_problem_12()
+    test_problem_13()

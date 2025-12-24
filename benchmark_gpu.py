@@ -68,10 +68,12 @@ def benchmark(device_name, n_suppliers, n_customers, n_runs=3):
     """Benchmark solver on specified device."""
     device = torch.device(device_name)
 
+    n_vars = n_suppliers * n_customers
+
     print(f"\n{'='*60}")
     print(f"Benchmarking on {device_name.upper()}")
     print(f"Problem: {n_suppliers} suppliers × {n_customers} customers")
-    print(f"Variables: {n_suppliers * n_customers}")
+    print(f"Variables: {n_vars}")
     print(f"Constraints: {n_suppliers + n_customers}")
     print(f"{'='*60}")
 
@@ -85,10 +87,14 @@ def benchmark(device_name, n_suppliers, n_customers, n_runs=3):
     l = l.to(device)
     u = u.to(device)
 
+    # Scale max iterations with problem size (roughly sqrt(n))
+    max_iters = max(100, int(200 * (n_vars / 150) ** 0.5))
+    print(f"Max iterations: {max_iters}")
+
     # Warmup
     if device.type == 'cuda':
         print("Warming up GPU...")
-        x, y, status, info = solve(G, A, c, h, b, l, u, verbose=False)
+        x, y, status, info = solve(G, A, c, h, b, l, u, verbose=False, MAX_OUTER_ITERS=max_iters)
         torch.cuda.synchronize()
 
     times = []
@@ -97,7 +103,7 @@ def benchmark(device_name, n_suppliers, n_customers, n_runs=3):
             torch.cuda.synchronize()
 
         start = time.time()
-        x, y, status, info = solve(G, A, c, h, b, l, u, verbose=False)
+        x, y, status, info = solve(G, A, c, h, b, l, u, verbose=False, MAX_OUTER_ITERS=max_iters)
 
         if device.type == 'cuda':
             torch.cuda.synchronize()
@@ -105,11 +111,14 @@ def benchmark(device_name, n_suppliers, n_customers, n_runs=3):
         elapsed = time.time() - start
         times.append(elapsed)
 
-        print(f"  Run {run+1}: {elapsed:.3f}s - {status}")
+        gap = abs(info['primal_obj'] - info['dual_obj'])
+        print(f"  Run {run+1}: {elapsed:.3f}s - {status} (gap: {gap:.3e})")
 
     avg_time = sum(times) / len(times)
     print(f"\nAverage: {avg_time:.3f}s")
-    print(f"Objective: {info['primal_obj']:.2f}")
+    print(f"Primal obj: {info['primal_obj']:.2f}")
+    print(f"Dual obj: {info['dual_obj']:.2f}")
+    print(f"Final gap: {abs(info['primal_obj'] - info['dual_obj']):.3e}")
 
     return avg_time
 

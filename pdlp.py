@@ -68,6 +68,7 @@ def solve(
     device = c.device
     dtype = c.dtype
     eps_zero = 1e-12
+    termination_check_frequency = 10
 
     m1, n = G.shape
     m2 = A.shape[0]
@@ -453,11 +454,6 @@ def solve(
         kkt_c_prev = kkt_last_restart # initialize for first iteration
 
         for t in range(MAX_INNER_ITERS):
-            status, info = termination_criteria(x, y)
-            if status:
-                converged = (status == "optimal")
-                break # optimal or detected infeasibility/unboundedness
-
             x, y, eta_used, eta_hat = adaptive_step_pdhg(x, y, w, eta_hat, k_global)
 
             # weighted average of iterates, weighted by step-size
@@ -474,6 +470,17 @@ def solve(
 
             k_global += 1
 
+            # Check termination periodically (always check first 10 iters, then every frequency)
+            if k_global <= 10 or k_global % termination_check_frequency == 0:
+                status, info = termination_criteria(x, y)
+                if status:
+                    # Ignore infeasibility detections before iteration 10 (early false positives)
+                    if k_global < 10 and status in ["primal_infeasible", "dual_infeasible"]:
+                        status = ""  # Reset status, keep iterating
+                    else:
+                        converged = (status == "optimal")
+                        break  # optimal or detected infeasibility after warm-up
+
             # check restart criteria
             cond_i  = (kkt_c_new <= (beta_sufficient**2) * kkt_last_restart) # sufficient progress made
             cond_ii = (kkt_c_new <= (beta_necessary**2) * kkt_last_restart) and (t > 0) and (kkt_c_new > kkt_c_prev) # necessary progress + stalling
@@ -487,8 +494,8 @@ def solve(
         else:
             x_c, y_c = x_c_new, y_c_new
 
-        # break out of outer loop only if optimal (continue restarting for infeasibility detections)
-        if converged: break
+        # break out of outer loop if we have termination status (optimal or infeasibility after warm-up)
+        if status: break
 
         # restart from candidate
         x, y = x_c, y_c

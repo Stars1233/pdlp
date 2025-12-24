@@ -432,9 +432,7 @@ def solve(
         if verbose and n_outer % 10 == 0:
             primal_obj = (c_orig @ x_unscaled).item()
             dual_obj = compute_dual_objective(x_unscaled, y_unscaled, c_orig, K_orig, q_orig, l_orig, u_orig).item()
-            kkt_err = torch.sqrt(kkt_last_restart).item()
-            gap = abs(primal_obj - dual_obj)
-            print(f"  Iter {n_outer:3d}: primal_obj = {primal_obj:+.6e}, dual_obj = {dual_obj:+.6e}, gap = {gap:.3e}, KKT = {kkt_err:.3e}")
+            print(f"  Iter {n_outer:3d}: primal_obj = {primal_obj:+.6e}, dual_obj = {dual_obj:+.6e}, gap = {abs(primal_obj - dual_obj):.3e}, KKT = {torch.sqrt(kkt_last_restart).item():.3e}")
 
         # reset averaging at start of each outer loop
         eta_sum = 0.0
@@ -521,10 +519,9 @@ def solve(
             status_msg = "converged" if converged else f"max iterations ({MAX_OUTER_ITERS})"
             primal_obj = (c_orig @ x_orig).item()
             dual_obj = compute_dual_objective(x_orig, y_orig, c_orig, K_orig, q_orig, l_orig, u_orig).item()
-            gap = abs(primal_obj - dual_obj)
             print(f"\n  Status: {status_msg} after {k_global} total iterations")
             print(f"  Primal objective: {primal_obj:.6e}")
             print(f"  Dual objective: {dual_obj:.6e}")
-            print(f"  Duality gap: {gap:.6e}")
+            print(f"  Duality gap: {abs(primal_obj - dual_obj):.6e}")
 
     return x_orig, y_orig, status, info

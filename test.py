@@ -5,6 +5,9 @@ Test the PDLP solver on multiple LP problems.
 import torch
 from pdlp import solve
 
+# Use float64 for numerical stability (standard for LP solvers)
+torch.set_default_dtype(torch.float64)
+
 
 def test_problem_1():
     """
@@ -542,7 +545,8 @@ def test_problem_13():
     print(f"  Total demand: {demand.sum():.2f}")
     print(f"  Expected: optimal solution with all demand satisfied")
 
-    x_sol, y_sol, status, info = solve(G, A, c, h, b, l, u, verbose=True, MAX_OUTER_ITERS=5000)
+    # With float64, the default eps_tol=1e-6 works well
+    x_sol, y_sol, status, info = solve(G, A, c, h, b, l, u, verbose=True)
 
     # Reshape solution back to matrix form
     x_matrix = x_sol.reshape(n_suppliers, n_customers)
@@ -563,18 +567,13 @@ def test_problem_13():
     print(f"    Total shipped: {x_sol.sum():.2f}")
     print(f"    Sparsity: {(x_sol > 1e-6).sum().item()}/{n_vars} non-zero variables")
 
-    # For large problems, accept high-quality feasible solutions even if not proven optimal
+    # With float64, we expect true optimality
     feasible = supply_violation < 1e-3 and demand_violation < 1e-3
-    high_quality = status in ["optimal", "max_iterations"] and feasible
+    passed = status == "optimal" and feasible
 
-    if status == "optimal":
-        print(f"  PASS (optimal)")
-    elif high_quality:
-        print(f"  PASS (feasible solution found)")
-    else:
-        print(f"  FAIL")
+    print(f"  {'PASS' if passed else 'FAIL'}")
 
-    return high_quality
+    return passed
 
 
 if __name__ == "__main__":

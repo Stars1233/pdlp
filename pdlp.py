@@ -61,9 +61,11 @@ def solve(
     assert G.shape[0] == h.shape[0]
     assert A.shape[0] == b.shape[0]
     assert G.shape[1] == A.shape[1] == c.shape[0] == l.shape[0] == u.shape[0]
+    assert G.is_sparse == A.is_sparse, "G and A must both be sparse or both be dense"
 
     device = c.device
     dtype = c.dtype
+    is_sparse = G.is_sparse
     eps_zero = 1e-12
     termination_check_frequency = 10
 
@@ -84,6 +86,33 @@ def solve(
     q = torch.cat([h, b], dim=0)
     K_orig = torch.cat([G_orig, A_orig], dim=0)
     q_orig = torch.cat([h_orig, b_orig], dim=0)
+
+    # Helper function for sparse tensor row slicing
+    def sparse_slice_rows(M, start_row, end_row):
+        """Slice rows [start_row:end_row) from sparse COO tensor"""
+        M = M.coalesce()
+        indices, values = M.indices(), M.values()
+        mask = (indices[0] >= start_row) & (indices[0] < end_row)
+        new_indices = indices[:, mask].clone()
+        new_indices[0] -= start_row # adjust row indices to start from 0
+        new_values = values[mask]
+        return torch.sparse_coo_tensor(new_indices, new_values, (end_row - start_row, M.shape[1]),
+            dtype=M.dtype, device=M.device
+        )
+
+    # Define operation lambdas based on whether K is sparse
+    if is_sparse:
+        # Sparse implementations using scatter_reduce
+        col_max = lambda M: torch.zeros(M.shape[1], dtype=M.dtype, device=M.device).scatter_reduce_(
+            0, (M_c := M.abs().coalesce()).indices()[1], M_c.values(), reduce='amax', include_self=False)
+        row_max = lambda M: torch.zeros(M.shape[0], dtype=M.dtype, device=M.device).scatter_reduce_(
+            0, (M_c := M.abs().coalesce()).indices()[0], M_c.values(), reduce='amax', include_self=False)
+        slice_rows = sparse_slice_rows
+    else:
+        # Dense implementations (original operations)
+        col_max = lambda M: M.abs().max(dim=0)[0]
+        row_max = lambda M: M.abs().max(dim=1)[0]
+        slice_rows = lambda M, start, end: M[start:end, :]
 
     # -----------------------------
     # Trivial cases: no variables or no constraints
@@ -137,15 +166,14 @@ def solve(
     # Ruiz rescaling (L-infinity equilibration)
     for _ in range(ruiz_iterations):
         # column rescaling: sqrt(max(|K[:,j]|, |c[j]|))
-        col_rescale = torch.sqrt(torch.maximum(K.abs().max(dim=0)[0], c.abs())).clamp_min(eps_zero)
-
+        col_rescale = torch.sqrt(torch.maximum(col_max(K), c.abs())).clamp_min(eps_zero)
         # row rescaling: sqrt(max(|K[i,:]|))
-        row_rescale = torch.sqrt(K.abs().max(dim=1)[0]).clamp_min(eps_zero)
+        row_rescale = torch.sqrt(row_max(K)).clamp_min(eps_zero)
 
         # apply rescaling
         c, l, u = c / col_rescale, l * col_rescale, u * col_rescale
         q = q / row_rescale
-        K = K / row_rescale.unsqueeze(1) / col_rescale.unsqueeze(0)
+        K = K * (1.0 / row_rescale).unsqueeze(1) * (1.0 / col_rescale).unsqueeze(0)
 
         constraint_rescaling *= row_rescale
         variable_rescaling *= col_rescale
@@ -153,14 +181,16 @@ def solve(
     # Pock-Chambolle rescaling (operator norm <= 1)
     if pock_chambolle_alpha > 0:
         # column rescaling: sqrt(sum_i |K[i,j]|^(2-alpha))
-        col_rescale = torch.sqrt((K.abs() ** (2 - pock_chambolle_alpha)).sum(dim=0)).clamp_min(eps_zero)
+        col_rescale = (K.abs() ** (2 - pock_chambolle_alpha)).sum(dim=0)
+        col_rescale = torch.sqrt(col_rescale.to_dense() if is_sparse else col_rescale).clamp_min(eps_zero)
         # row rescaling: sqrt(sum_j |K[i,j]|^alpha)
-        row_rescale = torch.sqrt((K.abs() ** pock_chambolle_alpha).sum(dim=1)).clamp_min(eps_zero)
+        row_rescale = (K.abs() ** pock_chambolle_alpha).sum(dim=1)
+        row_rescale = torch.sqrt(row_rescale.to_dense() if is_sparse else row_rescale).clamp_min(eps_zero)
 
-        # Apply rescaling
+        # apply rescaling
         c, l, u = c / col_rescale, l * col_rescale, u * col_rescale
         q = q / row_rescale
-        K = K / row_rescale.unsqueeze(1) / col_rescale.unsqueeze(0)
+        K = K * (1.0 / row_rescale).unsqueeze(1) * (1.0 / col_rescale).unsqueeze(0)
 
         constraint_rescaling *= row_rescale
         variable_rescaling *= col_rescale
@@ -170,8 +200,8 @@ def solve(
         print(f"  ||K|| after rescaling: {K.norm():.3e}")
 
     # split scaled K, q back into G, h, A, b (for algorithm)
-    G, h = K[:m1, :], q[:m1]
-    A, b = K[m1:, :], q[m1:]
+    G, h = slice_rows(K, 0, m1), q[:m1]
+    A, b = slice_rows(K, m1, m), q[m1:]
 
     # -----------------------------
     # Subprocedures
@@ -376,7 +406,9 @@ def solve(
     y0 = torch.zeros(m, device=device, dtype=dtype)
 
     # step size 1/||K||_inf
-    eta_hat = (1.0 / K.abs().sum(dim=1).max().clamp_min(eps_zero)).to(device=device, dtype=dtype)
+    row_sums = K.abs().sum(dim=1)
+    if is_sparse: row_sums = row_sums.to_dense() # clamp doesn't work on sparse
+    eta_hat = (1.0 / row_sums.max().clamp_min(eps_zero)).to(device=device, dtype=dtype)
 
     # initial weight
     w = (torch.linalg.norm(c) / torch.linalg.norm(q).clamp_min(eps_zero)).clamp_min(eps_zero)

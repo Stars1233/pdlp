@@ -113,7 +113,7 @@ def solve(
                     y_ray[m1:][violations_eq] = 1.0
 
             # Normalize
-            y_ray = y_ray / y_ray.abs().max().clamp_min(eps_zero)
+            y_ray = y_ray / torch.linalg.norm(y_ray, ord=float('inf')).clamp_min(eps_zero)
             dual_ray_obj = (q_orig @ y_ray).item()
 
             info = {
@@ -332,12 +332,12 @@ def solve(
         x_unscaled, y_unscaled = x_scaled / variable_rescaling, y_scaled / constraint_rescaling
 
         # Check for primal infeasibility (Farkas certificate via dual ray)
-        dual_norm_inf = torch.max(y_unscaled.abs())
+        dual_norm_inf = torch.linalg.norm(y_unscaled, ord=float('inf'))
         if dual_norm_inf > eps_zero:
             y_ray = y_unscaled / dual_norm_inf
             dual_ray_obj = (q_orig @ y_ray).item()
             if dual_ray_obj > 0:
-                dual_residual = torch.linalg.norm(K_orig.T @ y_ray, ord='inf').item()
+                dual_residual = torch.linalg.norm(K_orig.T @ y_ray, ord=float('inf')).item()
                 relative_infeas = dual_residual / dual_ray_obj
                 if relative_infeas < eps_tol * 100:
                     return "primal_infeasible", {
@@ -348,13 +348,13 @@ def solve(
                     }
 
         # Check for dual infeasibility (primal unbounded via primal ray)
-        primal_norm_inf = torch.max(x_unscaled.abs())
+        primal_norm_inf = torch.linalg.norm(x_unscaled, ord=float('inf'))
         if primal_norm_inf > eps_zero:
             x_ray = x_unscaled / primal_norm_inf
             primal_ray_obj = (c_orig @ x_ray).item()
             if primal_ray_obj < 0:
-                primal_residual_eq = torch.linalg.norm(A_orig @ x_ray, ord-'inf').item() if A_orig.shape[0] > 0 else 0.0
-                primal_residual_ineq = torch.linalg.norm(torch.clamp(-(G_orig @ x_ray), min=0.0), ord-'inf').item() if G_orig.shape[0] > 0 else 0.0
+                primal_residual_eq = torch.linalg.norm(A_orig @ x_ray, ord=float('inf')).item() if A_orig.shape[0] > 0 else 0.0
+                primal_residual_ineq = torch.linalg.norm(torch.clamp(-(G_orig @ x_ray), min=0.0), ord=float('inf')).item() if G_orig.shape[0] > 0 else 0.0
                 max_primal_residual = max(primal_residual_eq, primal_residual_ineq)
                 relative_infeas = max_primal_residual / (-primal_ray_obj)
                 if relative_infeas < eps_tol * 100:
@@ -440,7 +440,7 @@ def solve(
 
     # Initializations
 
-    # Initialize to zeros
+    # initialize to zeros
     x0 = proj_X(torch.zeros(n, device=device, dtype=dtype))
     y0 = torch.zeros(m, device=device, dtype=dtype)
 

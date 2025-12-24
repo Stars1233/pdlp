@@ -89,53 +89,88 @@ def solve(
     if n == 0:
         # no variables: check h <= 0 and b = 0 to be feasible
         feasible = torch.all(h <= eps_zero) and torch.all(b.abs() <= eps_zero)
+
+        if verbose:
+            print("\nPDLP Solver")
+            print(f"  Problem: {m1} inequalities, {m2} equalities, {n} variables")
+
         if feasible:
+            info = {"primal_obj": 0.0, "dual_obj": 0.0}
             if verbose:
-                print("\nPDLP Solver")
-                print(f"  Problem: {m1} inequalities, {m2} equalities, {n} variables")
                 print(f"\n  Status: converged (trivial, no variables)")
                 print(f"  Primal objective: 0.000000e+00")
-            return torch.zeros(0, device=device, dtype=dtype), torch.zeros(m, device=device, dtype=dtype), "optimal", {}
+            return torch.zeros(0, device=device, dtype=dtype), torch.zeros(m, device=device, dtype=dtype), "optimal", info
         else:
+            # Construct Farkas certificate: y with violations
+            y_ray = torch.zeros(m, device=device, dtype=dtype)
+            if m1 > 0:
+                violations_ineq = h > eps_zero
+                if violations_ineq.any():
+                    y_ray[:m1][violations_ineq] = 1.0
+            if m2 > 0:
+                violations_eq = b.abs() > eps_zero
+                if violations_eq.any():
+                    y_ray[m1:][violations_eq] = 1.0
+
+            # Normalize
+            y_ray = y_ray / y_ray.abs().max().clamp_min(eps_zero)
+            dual_ray_obj = (q_orig @ y_ray).item()
+
+            info = {
+                "ray": y_ray,
+                "dual_ray_obj": dual_ray_obj,
+                "dual_residual": 0.0,  # K^T y = 0 since n=0
+                "certificate_quality": 0.0,
+            }
+
             if verbose:
-                print("\nPDLP Solver")
-                print(f"  Problem: {m1} inequalities, {m2} equalities, {n} variables")
                 print(f"\n  Status: PRIMAL INFEASIBLE")
-                print(f"    No variables but constraints cannot be satisfied")
-            return torch.zeros(0, device=device, dtype=dtype), torch.zeros(m, device=device, dtype=dtype), "primal_infeasible", {}
+                print(f"    Farkas certificate (dual ray): y = {info['ray']}")
+                print(f"      K^T y ≈ 0:  ||K^T y|| = {info['dual_residual']:.3e}")
+                print(f"      q^T y > 0:  q^T y = {info['dual_ray_obj']:.3e}")
+                print(f"      Relative certificate quality: {info['certificate_quality']:.3e}")
+            return torch.zeros(0, device=device, dtype=dtype), torch.zeros(m, device=device, dtype=dtype), "primal_infeasible", info
 
     if m == 0:
-        # no constraints means if any c[i] < 0 and u[i] = inf, problem is unbounded
-        # otherwise optimal is x[i] = l[i] if c[i] >= 0, x[i] = u[i] if c[i] < 0
-        unbounded = False
-        x_sol = l.clone()
-        for i in range(n):
-            if c[i] < -eps_zero:
-                if torch.isinf(u[i]):
-                    unbounded = True
-                    break
-                else:
-                    x_sol[i] = u[i]
-            elif c[i] > eps_zero:
-                x_sol[i] = l[i]
-            else:  # c[i] ≈ 0
-                x_sol[i] = l[i]
+        # No constraints: optimal if all variables bounded in direction of objective
+        # Unbounded if any c[i] < 0 and u[i] = inf (or c[i] > 0 and l[i] = -inf)
+        x_sol = torch.where(c < -eps_zero, u, l)  # minimize c^T x: go to u if c<0, else l
 
-        if unbounded:
+        unbounded_mask = ((c < -eps_zero) & torch.isinf(u)) | ((c > eps_zero) & torch.isinf(l))
+
+        if verbose:
+            print("\nPDLP Solver")
+            print(f"  Problem: {m1} inequalities, {m2} equalities, {n} variables")
+
+        if unbounded_mask.any():
+            # Construct unboundedness ray
+            x_ray = torch.zeros(n, device=device, dtype=dtype)
+            unbounded_idx = torch.where(unbounded_mask)[0][0]  # pick first unbounded direction
+            x_ray[unbounded_idx] = 1.0 if c[unbounded_idx] < 0 else -1.0
+
+            primal_ray_obj = (c_orig @ x_ray).item()
+
+            info = {
+                "ray": x_ray,
+                "primal_ray_obj": primal_ray_obj,
+                "max_primal_residual": 0.0,  # K x = 0 since m=0
+                "certificate_quality": 0.0,
+            }
+
             if verbose:
-                print("\nPDLP Solver")
-                print(f"  Problem: {m1} inequalities, {m2} equalities, {n} variables")
                 print(f"\n  Status: DUAL INFEASIBLE (primal unbounded)")
-                print(f"    No constraints and negative objective coefficient with unbounded variable")
-            return x_sol, torch.zeros(0, device=device, dtype=dtype), "dual_infeasible", {}
+                print(f"    Unboundedness certificate (primal ray): x = {info['ray']}")
+                print(f"      K x ≈ 0:  max_residual = {info['max_primal_residual']:.3e}")
+                print(f"      c^T x < 0:  c^T x = {info['primal_ray_obj']:.3e}")
+                print(f"      Relative certificate quality: {info['certificate_quality']:.3e}")
+            return x_sol, torch.zeros(0, device=device, dtype=dtype), "dual_infeasible", info
         else:
+            obj = (c_orig @ x_sol).item()
+            info = {"primal_obj": obj, "dual_obj": obj}
             if verbose:
-                print("\nPDLP Solver")
-                print(f"  Problem: {m1} inequalities, {m2} equalities, {n} variables")
-                obj = (c @ x_sol).item()
                 print(f"\n  Status: converged (trivial, no constraints)")
                 print(f"  Primal objective: {obj:.6e}")
-            return x_sol, torch.zeros(0, device=device, dtype=dtype), "optimal", {}
+            return x_sol, torch.zeros(0, device=device, dtype=dtype), "optimal", info
 
     # -----------------------------
     # Rescaling / Preconditioning
@@ -302,7 +337,7 @@ def solve(
             y_ray = y_unscaled / dual_norm_inf
             dual_ray_obj = (q_orig @ y_ray).item()
             if dual_ray_obj > 0:
-                dual_residual = torch.linalg.norm(K_orig.T @ y_ray, ord=float('inf')).item()
+                dual_residual = torch.linalg.norm(K_orig.T @ y_ray, ord='inf').item()
                 relative_infeas = dual_residual / dual_ray_obj
                 if relative_infeas < eps_tol * 100:
                     return "primal_infeasible", {
@@ -318,8 +353,8 @@ def solve(
             x_ray = x_unscaled / primal_norm_inf
             primal_ray_obj = (c_orig @ x_ray).item()
             if primal_ray_obj < 0:
-                primal_residual_eq = torch.linalg.norm(A_orig @ x_ray, ord=float('inf')).item() if A_orig.shape[0] > 0 else 0.0
-                primal_residual_ineq = torch.linalg.norm(torch.clamp(-(G_orig @ x_ray), min=0.0), ord=float('inf')).item() if G_orig.shape[0] > 0 else 0.0
+                primal_residual_eq = torch.linalg.norm(A_orig @ x_ray, ord-'inf').item() if A_orig.shape[0] > 0 else 0.0
+                primal_residual_ineq = torch.linalg.norm(torch.clamp(-(G_orig @ x_ray), min=0.0), ord-'inf').item() if G_orig.shape[0] > 0 else 0.0
                 max_primal_residual = max(primal_residual_eq, primal_residual_ineq)
                 relative_infeas = max_primal_residual / (-primal_ray_obj)
                 if relative_infeas < eps_tol * 100:

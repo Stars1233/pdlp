@@ -71,6 +71,10 @@ def solve(
     m2 = A.shape[0]
     m = m1 + m2
 
+    if verbose:
+        print(f"\nPDLP Solver")
+        print(f"  Problem: {m1} inequalities, {m2} equalities, {n} variables")
+
     # save originals (for termination checks on original problem)
     G_orig, h_orig, A_orig, b_orig = G.clone(), h.clone(), A.clone(), b.clone()
     c_orig, l_orig, u_orig = c.clone(), l.clone(), u.clone()
@@ -87,74 +91,31 @@ def solve(
     if n == 0:
         # no variables: check h <= 0 and b = 0 to be feasible
         feasible = torch.all(h <= eps_zero) and torch.all(b.abs() <= eps_zero)
-
-        if verbose:
-            print("\nPDLP Solver")
-            print(f"  Problem: {m1} inequalities, {m2} equalities, {n} variables")
-
         if feasible:
             info = {"primal_obj": 0.0, "dual_obj": 0.0}
-            if verbose:
-                print(f"\n  Status: converged (trivial, no variables)")
-                print(f"  Primal objective: 0.000000e+00")
+            if verbose: print(f"\n  Status: converged (trivial, no variables)\n  Primal objective: 0.000000e+00")
             return torch.zeros(0, device=device, dtype=dtype), torch.zeros(m, device=device, dtype=dtype), "optimal", info
-        else:
-            # Construct Farkas certificate: y with violations
-            y_ray = torch.zeros(m, device=device, dtype=dtype)
-            if m1 > 0:
-                violations_ineq = h > eps_zero
-                if violations_ineq.any():
-                    y_ray[:m1][violations_ineq] = 1.0
-            if m2 > 0:
-                violations_eq = b.abs() > eps_zero
-                if violations_eq.any():
-                    y_ray[m1:][violations_eq] = 1.0
-
-            # Normalize
-            y_ray = y_ray / torch.linalg.norm(y_ray, ord=float('inf')).clamp_min(eps_zero)
-            dual_ray_obj = (q_orig @ y_ray).item()
-
-            info = {
-                "ray": y_ray,
-                "dual_ray_obj": dual_ray_obj,
-                "dual_residual": 0.0,  # K^T y = 0 since n=0
-                "certificate_quality": 0.0,
-            }
-
-            if verbose:
-                print(f"\n  Status: PRIMAL INFEASIBLE")
-                print(f"    Farkas certificate (dual ray): y = {info['ray']}")
-                print(f"      K^T y ≈ 0:  ||K^T y|| = {info['dual_residual']:.3e}")
-                print(f"      q^T y > 0:  q^T y = {info['dual_ray_obj']:.3e}")
-                print(f"      Relative certificate quality: {info['certificate_quality']:.3e}")
-            return torch.zeros(0, device=device, dtype=dtype), torch.zeros(m, device=device, dtype=dtype), "primal_infeasible", info
+        # Construct Farkas certificate: y with violations
+        y_ray = torch.cat([torch.where(h > eps_zero, 1.0, 0.0), torch.where(b.abs() > eps_zero, 1.0, 0.0)])
+        y_ray = y_ray / torch.linalg.norm(y_ray, ord=float('inf')).clamp_min(eps_zero)
+        info = {"ray": y_ray, "dual_ray_obj": (q_orig @ y_ray).item(), "dual_residual": 0.0, "certificate_quality": 0.0}
+        if verbose:
+            print(f"\n  Status: PRIMAL INFEASIBLE")
+            print(f"    Farkas certificate (dual ray): y = {info['ray']}")
+            print(f"      K^T y ≈ 0:  ||K^T y|| = {info['dual_residual']:.3e}")
+            print(f"      q^T y > 0:  q^T y = {info['dual_ray_obj']:.3e}")
+            print(f"      Relative certificate quality: {info['certificate_quality']:.3e}")
+        return torch.zeros(0, device=device, dtype=dtype), torch.zeros(m, device=device, dtype=dtype), "primal_infeasible", info
 
     if m == 0:
         # no constraints: optimal if all variables bounded in direction of objective
-        # unbounded if any c[i] < 0 and u[i] = inf (or c[i] > 0 and l[i] = -inf)
         x_sol = torch.where(c < -eps_zero, u, l)  # minimize c^T x: go to u if c<0, else l
-
         unbounded_mask = ((c < -eps_zero) & torch.isinf(u)) | ((c > eps_zero) & torch.isinf(l))
-
-        if verbose:
-            print("\nPDLP Solver")
-            print(f"  Problem: {m1} inequalities, {m2} equalities, {n} variables")
-
         if unbounded_mask.any():
-            # construct unboundedness ray
+            idx = torch.where(unbounded_mask)[0][0]
             x_ray = torch.zeros(n, device=device, dtype=dtype)
-            unbounded_idx = torch.where(unbounded_mask)[0][0]  # pick first unbounded direction
-            x_ray[unbounded_idx] = 1.0 if c[unbounded_idx] < 0 else -1.0
-
-            primal_ray_obj = (c_orig @ x_ray).item()
-
-            info = {
-                "ray": x_ray,
-                "primal_ray_obj": primal_ray_obj,
-                "max_primal_residual": 0.0,  # K x = 0 since m=0
-                "certificate_quality": 0.0,
-            }
-
+            x_ray[idx] = 1.0 if c[idx] < 0 else -1.0
+            info = {"ray": x_ray, "primal_ray_obj": (c_orig @ x_ray).item(), "max_primal_residual": 0.0, "certificate_quality": 0.0}
             if verbose:
                 print(f"\n  Status: DUAL INFEASIBLE (primal unbounded)")
                 print(f"    Unboundedness certificate (primal ray): x = {info['ray']}")
@@ -162,13 +123,10 @@ def solve(
                 print(f"      c^T x < 0:  c^T x = {info['primal_ray_obj']:.3e}")
                 print(f"      Relative certificate quality: {info['certificate_quality']:.3e}")
             return x_sol, torch.zeros(0, device=device, dtype=dtype), "dual_infeasible", info
-        else:
-            obj = (c_orig @ x_sol).item()
-            info = {"primal_obj": obj, "dual_obj": obj}
-            if verbose:
-                print(f"\n  Status: converged (trivial, no constraints)")
-                print(f"  Primal objective: {obj:.6e}")
-            return x_sol, torch.zeros(0, device=device, dtype=dtype), "optimal", info
+        obj = (c_orig @ x_sol).item()
+        info = {"primal_obj": obj, "dual_obj": obj}
+        if verbose: print(f"\n  Status: converged (trivial, no constraints)\n  Primal objective: {obj:.6e}")
+        return x_sol, torch.zeros(0, device=device, dtype=dtype), "optimal", info
 
     # -----------------------------
     # Rescaling / Preconditioning
@@ -208,8 +166,6 @@ def solve(
         variable_rescaling *= col_rescale
 
     if verbose:
-        print(f"\nPDLP Solver")
-        print(f"  Problem: {m1} inequalities, {m2} equalities, {n} variables")
         print(f"  Rescaling: Ruiz iters={ruiz_iterations}, Pock-Chambolle alpha={pock_chambolle_alpha}")
         print(f"  ||K|| after rescaling: {K.norm():.3e}")
 

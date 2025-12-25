@@ -331,9 +331,6 @@ def solve(
         dual_obj = compute_dual_objective(x_unscaled, y_unscaled)
         primal_obj = c_orig @ x_unscaled
 
-        g_orig = c_orig - (K_orig.T @ y_unscaled)
-        lam = compute_lambda_for_box(x_unscaled, g_orig, l_orig, u_orig)
-
         # condition (1): relative duality gap: |primal_obj - dual_obj| / (1 + |primal_obj| + |dual_obj|)
         gap_num = torch.abs(dual_obj - primal_obj)
         gap_den = 1.0 + torch.abs(dual_obj) + torch.abs(primal_obj)
@@ -346,6 +343,8 @@ def solve(
         feas_ok = feas <= eps_tol * (1.0 + torch.linalg.norm(q_orig))
 
         # condition (3): stationarity (dual feasibility)
+        g_orig = c_orig - (K_orig.T @ y_unscaled)
+        lam = compute_lambda_for_box(x_unscaled, g_orig, l_orig, u_orig)
         stat = torch.linalg.norm(g_orig - lam)
         stat_ok = stat <= eps_tol * (1.0 + torch.linalg.norm(c_orig))
 

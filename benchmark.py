@@ -152,7 +152,7 @@ def benchmark(device_name, n_suppliers, n_customers, n_runs=2, sparse=False):
     # Warmup
     if device.type == 'cuda':
         print("Warming up GPU...")
-        x, y, status, info = solve(c, G, h, A, b, l, u, verbose=True, iteration_limit=max_iters, time_sec_limit=time_limit_sec, eps_tol=eps_tol)
+        x, y, status, info = solve(c, G, h, A, b, l, u, verbose=False, iteration_limit=max_iters, time_sec_limit=time_limit_sec, eps_tol=eps_tol)
         torch.cuda.synchronize()
 
     times = []
@@ -162,7 +162,7 @@ def benchmark(device_name, n_suppliers, n_customers, n_runs=2, sparse=False):
 
         print(f"\n--- Run {run+1}/{n_runs} ---")
         start = time.time()
-        x, y, status, info = solve(c, G, h, A, b, l, u, verbose=True, iteration_limit=max_iters, time_sec_limit=time_limit_sec, eps_tol=eps_tol)
+        x, y, status, info = solve(c, G, h, A, b, l, u, verbose=False, iteration_limit=max_iters, time_sec_limit=time_limit_sec, eps_tol=eps_tol)
 
         if device.type == 'cuda':
             torch.cuda.synchronize()

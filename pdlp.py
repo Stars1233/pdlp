@@ -2,13 +2,10 @@ import torch
 import time
 
 def solve(
-    G: torch.Tensor,
-    A: torch.Tensor,
     c: torch.Tensor,
-    h: torch.Tensor,
-    b: torch.Tensor,
-    l: torch.Tensor,
-    u: torch.Tensor,
+    G: torch.Tensor, h: torch.Tensor,
+    A: torch.Tensor, b: torch.Tensor,
+    l: torch.Tensor, u: torch.Tensor,
     iteration_limit: int = 10000,
     time_sec_limit: float = float('inf'),
     primal_weight_update_smoothing: float = 0.3,

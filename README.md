@@ -6,4 +6,5 @@ The code is meant to have a "linear flow" as much as possible, so that steps are
 
 TODO:
 - return more info? like num iterations?
+- allow to set max time limit? instead of max iters?
 - clean up test cases

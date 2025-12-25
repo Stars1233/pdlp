@@ -200,7 +200,7 @@ def solve(
 
     if verbose:
         print(f"  Rescaling: Ruiz iters={ruiz_iterations}, Pock-Chambolle alpha={pock_chambolle_alpha}")
-        print(f"  ||K|| after rescaling: {K.norm():.3e}")
+        print(f"  ||K||_2 (operator norm) after rescaling: {torch.linalg.matrix_norm(K, ord=2).item():.3e}")
 
     # split scaled K, q back into G, h, A, b (for algorithm)
     G, h = slice_rows(K, 0, m1), q[:m1]

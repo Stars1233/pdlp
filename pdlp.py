@@ -337,7 +337,7 @@ def solve(
         # condition (1): relative duality gap: |primal_obj - dual_obj| / (1 + |primal_obj| + |dual_obj|)
         gap_num = torch.abs(dual_obj - primal_obj)
         gap_den = 1.0 + torch.abs(dual_obj) + torch.abs(primal_obj)
-        gap_ok = (gap_num / gap_den) <= eps_tol
+        gap_ok = gap_ok = gap_num <= eps_tol * (1.0 + torch.abs(dual_obj) + torch.abs(primal_obj))
 
         # condition (2): primal feasibility
         r_eq = b_orig - (A_orig @ x_unscaled)

@@ -1,4 +1,5 @@
 import torch
+import time
 
 def solve(
     G: torch.Tensor,
@@ -8,9 +9,8 @@ def solve(
     b: torch.Tensor,
     l: torch.Tensor,
     u: torch.Tensor,
-    MAX_OUTER_ITERS: int = 100,
-    MAX_INNER_ITERS: int = 100,
-    MAX_BACKTRACK: int = 50,
+    iteration_limit: int = 10000,
+    time_sec_limit: float = float('inf'),
     primal_weight_update_smoothing: float = 0.3,
     ruiz_iterations: int = 10,
     pock_chambolle_alpha: float = 1.0,
@@ -36,9 +36,8 @@ def solve(
         b: Equality constraint right-hand side (m2,)
         l: Variable lower bounds (n,) - use -inf for unbounded
         u: Variable upper bounds (n,) - use +inf for unbounded
-        MAX_OUTER_ITERS: Maximum number of outer iterations (restarts)
-        MAX_INNER_ITERS: Maximum number of inner PDHG iterations per restart
-        MAX_BACKTRACK: Maximum backtracking steps in adaptive step size
+        iteration_limit: Maximum number of PDHG iterations (default 10000)
+        time_sec_limit: Maximum solve time in seconds (default infinite)
         primal_weight_update_smoothing: Smoothing factor for primal weight updates (0-1)
         ruiz_iterations: Number of Ruiz equilibration iterations
         pock_chambolle_alpha: Pock-Chambolle rescaling parameter (0 = disable)
@@ -50,8 +49,8 @@ def solve(
     Returns:
         x_sol: Primal solution (n,)
         y_sol: Dual solution (m1 + m2,) where y[:m1] are inequality duals, y[m1:] are equality duals
-        status: "optimal", "primal_infeasible", "dual_infeasible", or "max_iterations"
-        info: Dict with certificate details (ray, certificate_quality) if infeasible/unbounded, else empty
+        status: "optimal", "primal_infeasible", "dual_infeasible", "iteration_limit", or "time_limit"
+        info: Dict with certificate details (ray, certificate_quality) if infeasible/unbounded, else objectives
     """
     # -----------------------------
     # Shape checks / setup
@@ -67,7 +66,12 @@ def solve(
     dtype = c.dtype
     is_sparse = G.is_sparse
     eps_zero = 1e-12
-    termination_check_frequency = 10
+    termination_check_frequency = 64 # check for termination every 64 steps
+    max_inner_iters = 1000 # max iterations between restarts
+    max_backtrack = 50 # max backtracking steps in adaptive step size
+
+    # track time for time limit
+    start_time = time.time()
 
     m1, n = G.shape
     m2 = A.shape[0]
@@ -376,7 +380,7 @@ def solve(
         fac1 = 1.0 if k == 0 else 1.0 - (kp1 ** -0.3)
         fac2 = 1.0 + (kp1 ** -0.6)
 
-        for _ in range(MAX_BACKTRACK):
+        for _ in range(max_backtrack):
             x_p = proj_X(x - (eta / w) * (c - (K.T @ y)))
             y_p = proj_Y(y + (eta * w) * (q - K @ (2.0 * x_p - x)))
 
@@ -424,12 +428,12 @@ def solve(
     beta_necessary = 0.8 # used for necessary progress condition
     beta_artificial = 0.36 # used for artificial restart condition
 
-    k_global = 0 # global step counter
+    n_iterations = 0 # total iteration counter
     status = ""
     info = {}
     x_unscaled_last, y_unscaled_last = x / variable_rescaling, y / constraint_rescaling
 
-    for n_outer in range(MAX_OUTER_ITERS):
+    while True:
         # compute KKT of last restart point with current primal weight
         kkt_last_restart = kkt_error_sq(x, y, w)
 
@@ -437,18 +441,13 @@ def solve(
         x_unscaled, y_unscaled = x / variable_rescaling, y / constraint_rescaling
         x_unscaled_last, y_unscaled_last = x_unscaled.clone(), y_unscaled.clone()
 
-        if verbose and n_outer % 10 == 0:
-            primal_obj = (c_orig @ x_unscaled).item()
-            dual_obj = compute_dual_objective(x_unscaled, y_unscaled).item()
-            print(f"  Iter {n_outer:3d}: primal_obj = {primal_obj:+.6e}, dual_obj = {dual_obj:+.6e}, gap = {abs(primal_obj - dual_obj):.3e}, KKT = {torch.sqrt(kkt_last_restart).item():.3e}")
-
         # reset averaging at start of each outer loop
         eta_sum = 0.0
         x_bar, y_bar = x.clone(), y.clone()
         kkt_c_prev = kkt_last_restart # initialize for first iteration
 
-        for t in range(MAX_INNER_ITERS):
-            x, y, eta_used, eta_hat = adaptive_step_pdhg(x, y, w, eta_hat, k_global)
+        for t in range(max_inner_iters):
+            x, y, eta_used, eta_hat = adaptive_step_pdhg(x, y, w, eta_hat, n_iterations)
 
             # weighted average of iterates, weighted by step-size
             eta_sum += float(eta_used)
@@ -462,25 +461,41 @@ def solve(
             x_c_new, y_c_new = (x, y) if (kkt_current < kkt_averaged) else (x_bar, y_bar)
             kkt_c_new = kkt_current if (kkt_current < kkt_averaged) else kkt_averaged
 
-            k_global += 1
+            n_iterations += 1
+
+            # verbose logging every 100 iterations
+            if verbose and n_iterations % 100 == 0:
+                x_unscaled, y_unscaled = x / variable_rescaling, y / constraint_rescaling
+                primal_obj = (c_orig @ x_unscaled).item()
+                dual_obj = compute_dual_objective(x_unscaled, y_unscaled).item()
+                print(f"  Iter {n_iterations:5d}: primal_obj = {primal_obj:+.6e}, dual_obj = {dual_obj:+.6e}, gap = {abs(primal_obj - dual_obj):.3e}, KKT = {torch.sqrt(kkt_current).item():.3e}")
+
+            # check iteration and time limits
+            if n_iterations >= iteration_limit:
+                status = "iteration_limit"
+                x_unscaled_last, y_unscaled_last = x / variable_rescaling,y / constraint_rescaling
+                break
+            if time.time() - start_time >= time_sec_limit:
+                status = "time_limit"
+                x_unscaled_last, y_unscaled_last = x / variable_rescaling, y / constraint_rescaling
+                break
 
             # check termination: first 10 iters, then every frequency
-            if k_global <= 10 or k_global % termination_check_frequency == 0:
+            if n_iterations <= 10 or n_iterations % termination_check_frequency == 0:
                 status, info = termination_criteria(x, y)
                 if status:
                     # ignore infeasibility detections before iteration 10 (early false positives)
-                    if k_global < 10 and status in ["primal_infeasible", "dual_infeasible"]:
+                    if n_iterations < 10 and status in ["primal_infeasible", "dual_infeasible"]:
                         status = "" # reset status, keep iterating
                     else:
                         # save the iterate where we terminated
-                        x_unscaled_last = x / variable_rescaling
-                        y_unscaled_last = y / constraint_rescaling
+                        x_unscaled_last, y_unscaled_last = x / variable_rescaling, y / constraint_rescaling
                         break # optimal or detected infeas/unbound after warm-up
 
             # check restart criteria
             cond_i  = (kkt_c_new <= (beta_sufficient**2) * kkt_last_restart) # sufficient progress made
             cond_ii = (kkt_c_new <= (beta_necessary**2) * kkt_last_restart) and (t > 0) and (kkt_c_new > kkt_c_prev) # necessary progress + stalling
-            cond_iii = (t >= beta_artificial * k_global) # too many inner iterations
+            cond_iii = (t >= beta_artificial * n_iterations) # too many inner iterations
 
             kkt_c_prev = kkt_c_new # save for next iteration
 
@@ -501,12 +516,6 @@ def solve(
         # store previous restart start
         x_prev, y_prev = x.clone(), y.clone()
 
-    # use last saved unscaled values for return
-    x_unscaled = x_unscaled_last
-    y_unscaled = y_unscaled_last
-
-    if not status: status = "max_iterations" # we hit max iters without a termination condition
-
     if verbose:
         if status == "primal_infeasible":
             print(f"\n  Status: PRIMAL INFEASIBLE")
@@ -520,11 +529,16 @@ def solve(
             print(f"      K x ≈ 0:  max_residual = {info['max_primal_residual']:.3e}")
             print(f"      c^T x < 0:  c^T x = {info['primal_ray_obj']:.3e}")
             print(f"      Relative certificate quality: {info['certificate_quality']:.3e}")
-        elif status in ["optimal", "max_iterations"]:
-            status_msg = "converged" if status == "optimal" else f"max iterations ({MAX_OUTER_ITERS})"
-            print(f"\n  Status: {status_msg} after {k_global} total iterations")
+        elif status in ["optimal", "iteration_limit", "time_limit"]:
+            if status == "optimal":
+                status_msg = "converged"
+            elif status == "iteration_limit":
+                status_msg = f"iteration limit ({iteration_limit})"
+            else:  # time_limit
+                status_msg = f"time limit ({time_sec_limit:.1f}s, elapsed: {time.time()-start_time:.1f}s)"
+            print(f"\n  Status: {status_msg} after {n_iterations} total iterations")
             print(f"  Primal objective: {info['primal_obj']:.6e}")
             print(f"  Dual objective: {info['dual_obj']:.6e}")
             print(f"  Duality gap: {abs(info['primal_obj'] - info['dual_obj']):.6e}")
 
-    return x_unscaled, y_unscaled, status, info
+    return x_unscaled_last, y_unscaled_last, status, info

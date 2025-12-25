@@ -187,9 +187,9 @@ def test_problem_7():
     l = torch.tensor([0.0, 0.0])
     u = torch.tensor([10.0, 10.0])
 
-    x_sol, y_sol, status, info = solve(G, A, c, h, b, l, u, verbose=False, MAX_OUTER_ITERS=100)
+    x_sol, y_sol, status, info = solve(G, A, c, h, b, l, u, verbose=False, iteration_limit=10000)
 
-    assert status in ["primal_infeasible", "max_iterations"]
+    assert status in ["primal_infeasible", "iteration_limit"]
 
 
 def test_problem_8():
@@ -212,9 +212,9 @@ def test_problem_8():
     l = torch.tensor([0.0, 0.0])
     u = torch.tensor([float('inf'), float('inf')])  # truly unbounded
 
-    x_sol, y_sol, status, info = solve(G, A, c, h, b, l, u, verbose=False, MAX_OUTER_ITERS=100)
+    x_sol, y_sol, status, info = solve(G, A, c, h, b, l, u, verbose=False, iteration_limit=10000)
 
-    assert status in ["dual_infeasible", "max_iterations"]
+    assert status in ["dual_infeasible", "iteration_limit"]
 
 
 def test_problem_9():
@@ -383,7 +383,7 @@ def test_problem_13():
     u = torch.ones(n_vars) * float('inf')
 
     # With float64, the default eps_tol=1e-6 works well
-    x_sol, y_sol, status, info = solve(G, A, c, h, b, l, u, verbose=False)
+    x_sol, y_sol, status, info = solve(G, A, c, h, b, l, u, verbose=True)
 
     # Reshape solution back to matrix form
     x_matrix = x_sol.reshape(n_suppliers, n_customers)

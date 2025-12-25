@@ -157,7 +157,7 @@ def test_dense_vs_sparse_equivalence():
     # Solve with dense
     x_dense, y_dense, status_dense, info_dense = solve(
         G_dense, A_dense, c, h, b, l, u,
-        MAX_OUTER_ITERS=50, verbose=False
+        iteration_limit=5000, verbose=False
     )
 
     # Solve with sparse
@@ -165,7 +165,7 @@ def test_dense_vs_sparse_equivalence():
     A_sparse = A_dense.to_sparse_coo()
     x_sparse, y_sparse, status_sparse, info_sparse = solve(
         G_sparse, A_sparse, c, h, b, l, u,
-        MAX_OUTER_ITERS=50, verbose=False
+        iteration_limit=5000, verbose=False
     )
 
     # Compare results
@@ -206,13 +206,13 @@ def test_very_sparse_matrices():
         A_sparse = A_dense.to_sparse_coo()
         x_sparse, y_sparse, status_sparse, info_sparse = solve(
             G_sparse, A_sparse, c, h, b, l, u,
-            MAX_OUTER_ITERS=100, verbose=False
+            iteration_limit=10000, verbose=False
         )
 
         # Solve dense
         x_dense, y_dense, status_dense, info_dense = solve(
             G_dense, A_dense, c, h, b, l, u,
-            MAX_OUTER_ITERS=100, verbose=False
+            iteration_limit=10000, verbose=False
         )
 
         assert status_sparse == status_dense
@@ -263,13 +263,13 @@ def test_structured_sparse():
     A_sparse = A.to_sparse_coo()
     x_sparse, _, status_sparse, info_sparse = solve(
         G_sparse, A_sparse, c, h, b, l, u,
-        MAX_OUTER_ITERS=100, verbose=False
+        iteration_limit=10000, verbose=False
     )
 
     # Solve with dense
     x_dense, _, status_dense, info_dense = solve(
         G, A, c, h, b, l, u,
-        MAX_OUTER_ITERS=100, verbose=False
+        iteration_limit=10000, verbose=False
     )
 
     assert status_dense == status_sparse
@@ -303,12 +303,12 @@ def test_empty_constraint_rows():
 
     x_sparse, _, status_sparse, _ = solve(
         G_sparse, A_sparse, c, h, b, l, u,
-        MAX_OUTER_ITERS=100, verbose=False
+        iteration_limit=10000, verbose=False
     )
 
     x_dense, _, status_dense, _ = solve(
         G_dense, A_dense, c, h, b, l, u,
-        MAX_OUTER_ITERS=100, verbose=False
+        iteration_limit=10000, verbose=False
     )
 
     assert status_sparse == status_dense
@@ -331,10 +331,10 @@ def test_no_inequalities():
 
     x, y, status, info = solve(
         G_sparse, A_sparse, c, h, b, l, u,
-        MAX_OUTER_ITERS=50, verbose=False
+        iteration_limit=5000, verbose=False
     )
 
-    assert status in ["optimal", "max_iterations", "primal_infeasible", "dual_infeasible"]
+    assert status in ["optimal", "iteration_limit", "primal_infeasible", "dual_infeasible"]
 
 
 def test_no_equalities():
@@ -352,7 +352,7 @@ def test_no_equalities():
 
     x, y, status, info = solve(
         G_sparse, A_sparse, c, h, b, l, u,
-        MAX_OUTER_ITERS=50, verbose=False
+        iteration_limit=5000, verbose=False
     )
 
-    assert status in ["optimal", "max_iterations", "primal_infeasible", "dual_infeasible"]
+    assert status in ["optimal", "iteration_limit", "primal_infeasible", "dual_infeasible"]

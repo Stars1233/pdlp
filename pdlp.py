@@ -478,7 +478,7 @@ def solve(
                 x_unscaled_last, y_unscaled_last = x / variable_rescaling, y / constraint_rescaling
                 break
 
-            # check termination: first 10 iters, then every frequency
+            # check termination and restart: first 10 iters, then every frequency
             if n_iterations <= 10 or n_iterations % termination_check_frequency == 0:
                 status, info = termination_criteria(x, y)
                 if status:
@@ -490,16 +490,16 @@ def solve(
                         x_unscaled_last, y_unscaled_last = x / variable_rescaling, y / constraint_rescaling
                         break # optimal or detected infeas/unbound after warm-up
 
-            # check restart criteria
-            cond_i  = (kkt_c_new <= (beta_sufficient**2) * kkt_last_restart) # sufficient progress made
-            cond_ii = (kkt_c_new <= (beta_necessary**2) * kkt_last_restart) and (t > 0) and (kkt_c_new > kkt_c_prev) # necessary progress + stalling
-            cond_iii = (t >= beta_artificial * n_iterations) # too many inner iterations
+                # check restart criteria (only if didn't terminate above)
+                cond_i  = (kkt_c_new <= (beta_sufficient**2) * kkt_last_restart) # sufficient progress made
+                cond_ii = (kkt_c_new <= (beta_necessary**2) * kkt_last_restart) and (t > 0) and (kkt_c_new > kkt_c_prev) # necessary progress + stalling
+                cond_iii = (t >= beta_artificial * n_iterations) # too many inner iterations
+
+                if cond_i or cond_ii or cond_iii:
+                    x_c, y_c = x_c_new, y_c_new
+                    break
 
             kkt_c_prev = kkt_c_new # save for next iteration
-
-            if cond_i or cond_ii or cond_iii:
-                x_c, y_c = x_c_new, y_c_new
-                break
         else:
             x_c, y_c = x_c_new, y_c_new
 

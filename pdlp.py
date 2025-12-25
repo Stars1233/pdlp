@@ -20,7 +20,7 @@ def solve(
     verbose: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, str, dict]:
     """
-    Solve a Linear Program using the Primal-Dual Hybrid Gradient (PDHG) algorithm.
+    Solve a Linear Program using the PDLP algorithm.
 
     Problem formulation:
         minimize    c^T x
@@ -50,7 +50,13 @@ def solve(
         x_sol: Primal solution (n,)
         y_sol: Dual solution (m1 + m2,) where y[:m1] are inequality duals, y[m1:] are equality duals
         status: "optimal", "primal_infeasible", "dual_infeasible", "iteration_limit", or "time_limit"
-        info: Dict with certificate details (ray, certificate_quality) if infeasible/unbounded, else objectives
+        info: Dict with solve statistics.
+            - Always contains: solve_time_sec, iterations
+            - For optimal/iteration_limit/time_limit also contains:
+                primal_obj, dual_obj, duality_gap, relative_gap
+                primal_residual, dual_residual, kkt_error_sq
+            - For primal_infeasible/dual_infeasible also contains:
+                ray, certificate_quality ray
     """
     # -----------------------------
     # Shape checks / setup
@@ -516,6 +522,30 @@ def solve(
         # store previous restart start
         x_prev, y_prev = x.clone(), y.clone()
 
+    # compute metrics for all cases
+    total_time = time.time() - start_time
+    info['solve_time_sec'] = total_time
+    info['iterations'] = n_iterations
+
+    # for optimal/iteration_limit/time_limit, add detailed metrics
+    if status in ["optimal", "iteration_limit", "time_limit"]:
+        # Compute KKT error squared at final iterate
+        info['kkt_error_sq'] = kkt_error_sq(x, y, w).item()
+
+        # Compute primal residual (feasibility violation)
+        r_eq = b_orig - (A_orig @ x_unscaled_last)
+        r_ineq = torch.clamp(h_orig - (G_orig @ x_unscaled_last), min=0.0)
+        info['primal_residual'] = torch.sqrt((r_eq @ r_eq) + (r_ineq @ r_ineq)).item()
+
+        # Compute dual residual (stationarity violation)
+        g_orig = c_orig - (K_orig.T @ y_unscaled_last)
+        lam = compute_lambda_for_box(x_unscaled_last, g_orig, l_orig, u_orig)
+        info['dual_residual'] = torch.linalg.norm(g_orig - lam).item()
+
+        # Compute duality gap metrics
+        info['duality_gap'] = abs(info['primal_obj'] - info['dual_obj'])
+        info['relative_gap'] = info['duality_gap'] / (1.0 + abs(info['primal_obj']) + abs(info['dual_obj']))
+
     if verbose:
         if status == "primal_infeasible":
             print(f"\n  Status: PRIMAL INFEASIBLE")
@@ -535,10 +565,10 @@ def solve(
             elif status == "iteration_limit":
                 status_msg = f"iteration limit ({iteration_limit})"
             else:  # time_limit
-                status_msg = f"time limit ({time_sec_limit:.1f}s, elapsed: {time.time()-start_time:.1f}s)"
-            print(f"\n  Status: {status_msg} after {n_iterations} total iterations")
+                status_msg = f"time limit ({time_sec_limit:.1f}s)"
+            print(f"\n  Status: {status_msg} after {n_iterations} iterations in {info['solve_time_sec']:.3f}s")
             print(f"  Primal objective: {info['primal_obj']:.6e}")
             print(f"  Dual objective: {info['dual_obj']:.6e}")
-            print(f"  Duality gap: {abs(info['primal_obj'] - info['dual_obj']):.6e}")
+            print(f"  Duality gap: {info['duality_gap']:.6e}")
 
     return x_unscaled_last, y_unscaled_last, status, info

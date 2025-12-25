@@ -166,15 +166,17 @@ if __name__ == "__main__":
     # Mittelmann benchmark problems (small to large)
     # Format: (url, compressed_filename, description)
     benchmarks = [
-        # Small problems (< 10k variables)
-        ("https://plato.asu.edu/ftp/lp/mps/25fv47.mps.bz2", "25fv47.mps.bz2", "Small (821 vars, 0.18% dense)"),
+        # Small problems (< 1MB compressed)
+        ("https://plato.asu.edu/ftp/lptestset/brazil3.mps.bz2", "brazil3.mps.bz2", "Small - brazil3 (343KB)"),
+        ("https://plato.asu.edu/ftp/lptestset/qap15.mps.bz2", "qap15.mps.bz2", "Small - qap15 (276KB)"),
 
-        # Medium problems (10k-100k variables)
-        ("https://plato.asu.edu/ftp/lp/mps/dfl001.mps.bz2", "dfl001.mps.bz2", "Medium (6,071 vars, 0.77% dense)"),
-        ("https://plato.asu.edu/ftp/lp/mps/pilot87.mps.bz2", "pilot87.mps.bz2", "Medium (4,883 vars, 0.42% dense)"),
+        # Medium problems (1-20MB compressed)
+        ("https://plato.asu.edu/ftp/lptestset/neos-3025225.mps.bz2", "neos-3025225.mps.bz2", "Medium - neos-3025225 (12MB)"),
+        ("https://plato.asu.edu/ftp/lptestset/bharat.mps.bz2", "bharat.mps.bz2", "Medium - bharat (13MB)"),
 
-        # Large problems (100k-1M variables)
-        ("https://plato.asu.edu/ftp/lp/mps/nug08.mps.bz2", "nug08.mps.bz2", "Large (1,632 vars, 33.8% dense)"),
+        # Large problems (20-100MB compressed)
+        ("https://plato.asu.edu/ftp/lptestset/s82.mps.bz2", "s82.mps.bz2", "Large - s82 (27MB)"),
+        ("https://plato.asu.edu/ftp/lptestset/dlr1.mps.bz2", "dlr1.mps.bz2", "Large - dlr1 (48MB)"),
     ]
 
     print("\nAvailable benchmarks:")

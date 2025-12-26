@@ -6,6 +6,12 @@ On transportation problems of different sizes.
 
 import torch
 import time
+import os
+import sys
+
+# Add parent directory to path so we can import pdlp
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from pdlp import solve
 
 torch.set_default_dtype(torch.float64)

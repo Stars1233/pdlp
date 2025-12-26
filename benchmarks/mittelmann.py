@@ -5,9 +5,13 @@ Benchmark MPS files from Mittelmann benchmarks on GPU.
 import torch
 import time
 import os
+import sys
 import urllib.request
 import bz2
 import gzip
+
+# Add parent directory to path so we can import pdlp and cli
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cli import parse_mps
 from pdlp import solve

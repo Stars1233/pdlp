@@ -14,7 +14,7 @@ import urllib.request
 import bz2
 import gzip
 
-from load_mps import parse_mps
+from cli import parse_mps
 from pdlp import solve
 
 

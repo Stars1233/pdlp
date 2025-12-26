@@ -70,7 +70,7 @@ def solve(
     dtype = c.dtype
     is_sparse = G.is_sparse
     eps_zero = 1e-12
-    termination_check_frequency = 100 # how frequently to check for termination
+    termination_check_frequency = 50 # how frequently to check for termination
     max_inner_iters = 1000 # max iterations between restarts
     max_backtrack = 50 # max backtracking steps in adaptive step size
 

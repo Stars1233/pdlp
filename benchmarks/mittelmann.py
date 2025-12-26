@@ -162,31 +162,32 @@ if __name__ == "__main__":
         print("⚠ No GPU, using CPU")
         device = 'cpu'
 
-    # Mittelmann benchmark problems (small to large)
-    # Format: (url, compressed_filename, description)
+    # Mittelmann benchmark problems from https://plato.asu.edu/ftp/lpopt.html
+    # Format: (url, compressed_filename, description, rows, cols, nnz)
     benchmarks = [
-        # Small problems (< 1MB compressed)
-        ("https://plato.asu.edu/ftp/lptestset/brazil3.mps.bz2", "brazil3.mps.bz2", "Small - brazil3 (343KB)"),
-        ("https://plato.asu.edu/ftp/lptestset/qap15.mps.bz2", "qap15.mps.bz2", "Small - qap15 (276KB)"),
+        # Small problems
+        ("https://plato.asu.edu/ftp/lptestset/qap15.mps.bz2", "qap15.mps.bz2", "qap15", 6331, 22275, 110700),
+        ("https://plato.asu.edu/ftp/lptestset/neos3.mps.bz2", "neos3.mps.bz2", "neos3", 512209, 6624, 1542816),
 
-        # Medium problems (1-20MB compressed)
-        ("https://plato.asu.edu/ftp/lptestset/neos-3025225.mps.bz2", "neos-3025225.mps.bz2", "Medium - neos-3025225 (12MB)"),
-        ("https://plato.asu.edu/ftp/lptestset/bharat.mps.bz2", "bharat.mps.bz2", "Medium - bharat (13MB)"),
+        # Medium problems
+        ("https://plato.asu.edu/ftp/lptestset/rail02.mps.bz2", "rail02.mps.bz2", "rail02", 95791, 270869, 756228),
+        ("https://plato.asu.edu/ftp/lptestset/irish-e.mps.bz2", "irish-e.mps.bz2", "irish-e", 104260, 61728, 538809),
+        ("https://plato.asu.edu/ftp/lptestset/pds-100.mps.bz2", "pds-100.mps.bz2", "pds-100", 156244, 505360, 1390539),
 
-        # Large problems (20-100MB compressed)
-        ("https://plato.asu.edu/ftp/lptestset/s82.mps.bz2", "s82.mps.bz2", "Large - s82 (27MB)"),
-        ("https://plato.asu.edu/ftp/lptestset/dlr1.mps.bz2", "dlr1.mps.bz2", "Large - dlr1 (48MB)"),
+        # Large problems
+        ("https://plato.asu.edu/ftp/lptestset/L1_sixm250obs.mps.bz2", "L1_sixm250obs.mps.bz2", "L1_sixm250obs", 986069, 428032, 4280320),
+        ("https://plato.asu.edu/ftp/lptestset/dlr1.mps.bz2", "dlr1.mps.bz2", "dlr1", 1735470, 9121907, 18365107),
     ]
 
     print("\nAvailable benchmarks:")
-    for i, (url, filename, desc) in enumerate(benchmarks, 1):
-        print(f"  {i}. {desc} - {filename}")
+    for i, (url, filename, name, rows, cols, nnz) in enumerate(benchmarks, 1):
+        print(f"  {i}. {name:<20} {rows:>9,} rows × {cols:>9,} cols × {nnz:>11,} nnz")
 
-    # Run benchmarks
+    # Run benchmarks on both CPU and GPU
     results = []
-    time_limit = 3600  # 1 hr per problem
+    time_limit = 600  # 10 min per problem per device
 
-    for url, compressed_file, desc in benchmarks:
+    for url, compressed_file, name, rows, cols, nnz in benchmarks:
         try:
             # Download if needed
             compressed_path = download_mps(url, compressed_file)
@@ -194,9 +195,18 @@ if __name__ == "__main__":
             # Decompress if needed
             mps_file = decompress_mps(compressed_path)
 
-            # Benchmark
-            result = benchmark_mps(mps_file, device=device, time_limit=time_limit, use_sparse=True)
-            results.append(result)
+            # Benchmark on GPU (if available)
+            if device == 'cuda':
+                result_gpu = benchmark_mps(mps_file, device='cuda', time_limit=time_limit, use_sparse=True)
+                result_gpu['device'] = 'GPU'
+                result_gpu['name'] = name
+                results.append(result_gpu)
+
+            # Benchmark on CPU
+            result_cpu = benchmark_mps(mps_file, device='cpu', time_limit=time_limit, use_sparse=True)
+            result_cpu['device'] = 'CPU'
+            result_cpu['name'] = name
+            results.append(result_cpu)
 
         except Exception as e:
             print(f"\n⚠ Error with {compressed_file}: {e}")
@@ -206,11 +216,31 @@ if __name__ == "__main__":
     print("\n\n" + "="*80)
     print("SUMMARY")
     print("="*80)
-    print(f"{'Problem':<20} {'Status':<15} {'Load (s)':<10} {'Solve (s)':<10} {'Iters':<10}")
+    print(f"{'Problem':<20} {'Device':<8} {'Status':<12} {'Solve (s)':<12} {'Iters':<10} {'Speedup':<10}")
     print("-"*80)
 
+    # Group results by problem
+    problem_results = {}
     for r in results:
-        filename = os.path.basename(r['file'])
-        print(f"{filename:<20} {r['status']:<15} {r['load_time']:<10.2f} {r['solve_time']:<10.2f} {r['iterations']:<10}")
+        name = r['name']
+        if name not in problem_results:
+            problem_results[name] = {}
+        problem_results[name][r['device']] = r
+
+    for name in [b[2] for b in benchmarks]:  # Maintain order
+        if name not in problem_results:
+            continue
+
+        gpu_result = problem_results[name].get('GPU')
+        cpu_result = problem_results[name].get('CPU')
+
+        if gpu_result:
+            speedup = ""
+            if cpu_result and gpu_result['status'] == cpu_result['status']:
+                speedup = f"{cpu_result['solve_time'] / gpu_result['solve_time']:.2f}x"
+            print(f"{name:<20} {'GPU':<8} {gpu_result['status']:<12} {gpu_result['solve_time']:<12.2f} {gpu_result['iterations']:<10} {speedup:<10}")
+
+        if cpu_result:
+            print(f"{name:<20} {'CPU':<8} {cpu_result['status']:<12} {cpu_result['solve_time']:<12.2f} {cpu_result['iterations']:<10} {'':<10}")
 
     print("\n✓ Benchmarking complete!")

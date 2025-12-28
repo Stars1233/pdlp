@@ -53,4 +53,4 @@ Despite its simplicity, the solver is quite fast. Here are the results on some M
 | rmine15 | 358,395 × 42,438 | 879,732 (0.0058%) | Optimal | **57.69** | Optimal | 2396.96 |
 | dlr1 | 1,735,470 × 9,142,907 | 18,365,107 (0.0001%) | Time limit | 3601.19 | Time limit | 3600 |
 
-As you can see, the solver achieves significant speedups on a GPU -- up to 70x speedup! These runtimes are competitive with some of the solvers listed on the Mittelmann benchmark page.
+As you can see, the solver achieves significant speedups on a GPU -- up to 40x speedup! These runtimes are competitive with some of the solvers listed on the Mittelmann benchmark page.

@@ -304,8 +304,8 @@ def solve(
 
     @torch.no_grad()
     def termination_criteria(
-        x_scaled: torch.Tensor,
-        y_scaled: torch.Tensor,
+        x_unscaled: torch.Tensor,
+        y_unscaled: torch.Tensor,
         G_orig_x: torch.Tensor | None = None, # cached G_orig @ x
         A_orig_x: torch.Tensor | None = None, # cached A_orig @ x
         KT_orig_y: torch.Tensor | None = None, # cached K_orig.T @ x
@@ -314,11 +314,9 @@ def solve(
         Check termination on original problem. Returns (status, info)
         where status is '' if continuing, 'optimal', 'primal_infeasible', or 'dual_infeasible' if done.
         """
-        x_unscaled, y_unscaled = x_scaled / variable_rescaling, y_scaled / constraint_rescaling
-
         # compute objectives early so they're available in all return paths
         if KT_orig_y is None: KT_orig_y = K_orig.T @ y_unscaled
-        dual_obj = compute_dual_objective(x_unscaled, y_unscaled, KTy_orig=KT_orig_y)
+        dual_obj = compute_dual_objective(x_unscaled, y_unscaled)
         primal_obj = c_orig @ x_unscaled
 
         # Check for primal infeasibility (Farkas certificate via dual ray)
@@ -504,7 +502,7 @@ def solve(
                 x_c_new, y_c_new = (x, y) if (kkt_current < kkt_averaged) else (x_bar, y_bar)
                 kkt_c_new = kkt_current if (kkt_current < kkt_averaged) else kkt_averaged
 
-                status, info = termination_criteria(x, y, G_orig_x=G_orig_x, A_orig_x=A_orig_x, KT_orig_y=KT_orig_y)
+                status, info = termination_criteria(x_unscaled, y_unscaled, G_orig_x=G_orig_x, A_orig_x=A_orig_x, KT_orig_y=KT_orig_y)
                 if verbose:
                     print(f"  Iter {n_iterations:5d}: primal_obj = {info['primal_obj']:+.6e}, dual_obj = {info['dual_obj']:+.6e}, gap = {abs(info['primal_obj'] - info['dual_obj']):.3e}, KKT = {torch.sqrt(kkt_current).item():.3e}")
                 if status:

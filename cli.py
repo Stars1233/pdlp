@@ -422,7 +422,7 @@ Modeling language integration:
     # Print header (unless quiet)
     if not args.quiet:
         print("="*80)
-        print("PDLP Solver - GPU-accelerated Linear Programming")
+        print("PDLP LP Solver")
         print("="*80)
         print(f"Problem: {problem_name}")
         print(f"Device: {device.upper()}")

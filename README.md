@@ -37,7 +37,7 @@ This also accepts various arguments -- see the docstring or `python cli.py --hel
 
 The `cli.py` script also contains a function `parse_mps()` that can parse MPS files and return the problem data in the format expected by `solve()`.
 
-There are some benchmarking scripts in `benchmarks/` that can be used to test the performance of the solver. One of them, `benchmarks/transport.py`, constructs transportation problems of different sizes and solves them on CPU and GPU. I was using this while developing the solver. You can also run `benchmarks/mittelmann.py` to benchmark the solver on a random selection of Mittelmann benchmark problems (what I report below).
+There are some benchmarking scripts in `benchmarks/` that can be used to test the performance of the solver. One of them, `benchmarks/transport.py`, constructs transportation problems of different sizes and solves them on CPU and GPU. I was using this while developing the solver. You can also run `benchmarks/mittelmann.py` to benchmark the solver on a random selection of Mittelmann benchmark problems (what I report below). It will download the problems, extract them, parse them, then run the solver.
 
 ## Benchmarks
 

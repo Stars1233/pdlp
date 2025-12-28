@@ -492,9 +492,9 @@ def solve(
             if n_iterations <= 10 or n_iterations % termination_check_frequency == 0:
                 # precompute and cache needed matrix products
                 Gx, Ax, KTy = G @ x, A @ x, K.T @ y
+                Gx_bar, Ax_bar, KTy_bar = G @ x_bar, A @ x_bar, K.T @ y_bar
                 x_unscaled, y_unscaled = x / variable_rescaling, y / constraint_rescaling
                 G_orig_x, A_orig_x, KT_orig_y = G_orig @ x_unscaled, A_orig @ x_unscaled, K_orig.T @ y_unscaled
-                Gx_bar, Ax_bar, KTy_bar = G @ x_bar, A @ x_bar, K.T @ y_bar
 
                 # Choose restart candidate: choose one with lower KKT
                 kkt_current = kkt_error_sq(x, y, w, Gx=Gx, Ax=Ax, KTy=KTy)

@@ -510,7 +510,7 @@ def solve(
                         status = "" # reset status, keep iterating
                     else:
                         # save the iterate where we terminated
-                        x_unscaled_last, y_unscaled_last = x / variable_rescaling, y / constraint_rescaling
+                        x_unscaled_last, y_unscaled_last = x_unscaled, y_unscaled
                         break # optimal or detected infeas/unbound after warm-up
 
                 # check restart criteria (only if didn't terminate above)
